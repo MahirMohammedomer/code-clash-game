@@ -1,0 +1,18 @@
+{
+  "name": "Code Clash — Competitive 4-Digit Code Breaker",
+  "short_name": "Code Clash",
+  "description": "Playful, Duolingo-inspired competitive 4-digit code-breaking arena game with 1v1 Multiplayer, 4-Tier AI, Hotseat, Local Offline, Season Pass & Tournaments.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFFDF7",
+  "theme_color": "#58CC02",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
