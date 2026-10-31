@@ -1,0 +1,45 @@
+/* Shared micro-animations for the premium arcade remakes. */
+
+@keyframes floatUp {
+  0% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -52px) scale(1.2); }
+}
+.float-up { animation: floatUp 0.85s ease-out forwards; }
+
+@keyframes tilePop {
+  0% { transform: scale(0.55); }
+  60% { transform: scale(1.16); }
+  100% { transform: scale(1); }
+}
+.tile-pop { animation: tilePop 0.18s ease-out; }
+
+@keyframes tileSpawn {
+  0% { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.tile-spawn { animation: tileSpawn 0.16s ease-out; }
+
+@keyframes gemPop {
+  0% { transform: scale(1); opacity: 1; filter: brightness(2); }
+  100% { transform: scale(1.7); opacity: 0; filter: brightness(2.4); }
+}
+.gem-pop { animation: gemPop 0.22s ease-out forwards; }
+
+@keyframes shakeX {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+.shake-x { animation: shakeX 0.16s ease-in-out 2; }
+
+@keyframes feverGlow {
+  0%, 100% { box-shadow: 0 0 18px 2px rgba(255, 170, 0, 0.55), inset 0 0 22px rgba(255, 170, 0, 0.25); }
+  50% { box-shadow: 0 0 34px 8px rgba(255, 120, 0, 0.8), inset 0 0 34px rgba(255, 140, 0, 0.4); }
+}
+.fever-glow { animation: feverGlow 0.7s ease-in-out infinite; }
+
+@keyframes wiggleHint {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.14) rotate(4deg); }
+}
+.wiggle-hint { animation: wiggleHint 0.5s ease-in-out infinite; }
