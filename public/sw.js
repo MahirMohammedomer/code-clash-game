@@ -1,6 +1,6 @@
 /* Cipher Clash service worker — network-first for pages & APIs,
    cache-first for static assets. Bump VERSION to ship updates. */
-const VERSION = "cipher-clash-v4";
+const VERSION = "cipher-clash-v5";
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 
