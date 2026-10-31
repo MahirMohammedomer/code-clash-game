@@ -16,6 +16,12 @@ export interface MoreGame {
   blurb: string;
   /** "touch" = great on phones, "both" = touch + keyboard, "keyboard" = desktop best */
   controls: "touch" | "both" | "keyboard";
+  /** Set for our six premium from-scratch remakes — opens a native game instead of an iframe. */
+  native?: "g2048" | "snake" | "flappy" | "gems" | "breakout" | "hopper";
+  /** Illustrated thumbnail under /public/arcade/. */
+  thumb?: string;
+  /** Shown big in the "Featured Remakes" rail. */
+  featured?: boolean;
 }
 
 export const MORE_GAME_CATEGORIES: ("All" | MoreGameCategory)[] = [
@@ -27,13 +33,13 @@ export const MORE_GAME_CATEGORIES: ("All" | MoreGameCategory)[] = [
 ];
 
 export const MORE_GAMES: MoreGame[] = [
-  { slug: "2048", title: "2048", emoji: "🔢", color: "linear-gradient(135deg,#FFC800,#FF7A18)", category: "Puzzle", blurb: "Slide tiles, merge numbers — can you reach 2048?", controls: "both" },
-  { slug: "snake", title: "Snake", emoji: "🐍", color: "linear-gradient(135deg,#58CC02,#1F9D55)", category: "Classics", blurb: "Eat the apples, grow long, don't bite yourself!", controls: "keyboard" },
-  { slug: "flappy-bird", title: "Flappy Bird", emoji: "🐤", color: "linear-gradient(135deg,#1CB0F6,#7B5CFF)", category: "Arcade", blurb: "Tap to flap through the pipes. Simple... and brutal!", controls: "both" },
-  { slug: "candy-crush", title: "Candy Crush", emoji: "🍬", color: "linear-gradient(135deg,#FF4B6E,#A560E8)", category: "Puzzle", blurb: "Swap candies and match 3 or more to score.", controls: "touch" },
-  { slug: "doodle-jump", title: "Doodle Jump", emoji: "🐸", color: "linear-gradient(135deg,#2EE6A8,#1CB0F6)", category: "Arcade", blurb: "Bounce platform to platform, as high as you can!", controls: "keyboard" },
+  { slug: "2048", title: "2048 Merge", emoji: "🔢", color: "linear-gradient(135deg,#FFC800,#FF7A18)", category: "Puzzle", blurb: "REMAKE ★ Slide & merge to 2048 — smooth moves, undo, score pops!", controls: "both", native: "g2048", thumb: "/arcade/2048.jpg", featured: true },
+  { slug: "snake", title: "Snake", emoji: "🐍", color: "linear-gradient(135deg,#58CC02,#1F9D55)", category: "Classics", blurb: "REMAKE ★ Silky-smooth snake, golden apples worth +50!", controls: "both", native: "snake", thumb: "/arcade/snake.jpg", featured: true },
+  { slug: "flappy-bird", title: "Flappy Wings", emoji: "🐤", color: "linear-gradient(135deg,#1CB0F6,#7B5CFF)", category: "Arcade", blurb: "REMAKE ★ One-tap flying with medals to earn. Brutal & beautiful!", controls: "both", native: "flappy", thumb: "/arcade/flappy.jpg", featured: true },
+  { slug: "candy-crush", title: "Gem Crush", emoji: "💎", color: "linear-gradient(135deg,#FF4B6E,#A560E8)", category: "Puzzle", blurb: "REMAKE ★ 60-second match-3 blitz with combos & FEVER mode!", controls: "both", native: "gems", thumb: "/arcade/gems.jpg", featured: true },
+  { slug: "doodle-jump", title: "Sky Hopper", emoji: "🐸", color: "linear-gradient(135deg,#2EE6A8,#1CB0F6)", category: "Arcade", blurb: "REMAKE ★ Bounce to space! Springs, jetpacks & stompable blobs.", controls: "both", native: "hopper", thumb: "/arcade/hopper.jpg", featured: true },
   { slug: "dino-run", title: "Dino Run", emoji: "🦖", color: "linear-gradient(135deg,#8A97AD,#5B6ABF)", category: "Arcade", blurb: "The famous offline dinosaur jumping game.", controls: "both" },
-  { slug: "breakout", title: "Breakout", emoji: "🧱", color: "linear-gradient(135deg,#FF7A18,#FF4B4B)", category: "Arcade", blurb: "Bounce the ball and smash every brick.", controls: "both" },
+  { slug: "breakout", title: "Neon Breakout", emoji: "🧱", color: "linear-gradient(135deg,#FF7A18,#FF4B4B)", category: "Arcade", blurb: "REMAKE ★ Brick-smashing with levels, power-ups & multi-ball!", controls: "both", native: "breakout", thumb: "/arcade/breakout.jpg", featured: true },
   { slug: "space-invaders", title: "Space Invaders", emoji: "👾", color: "linear-gradient(135deg,#7B5CFF,#26283B)", category: "Arcade", blurb: "Defend Earth from waves of alien invaders!", controls: "keyboard" },
   { slug: "fighting-game", title: "Samurai Fighting", emoji: "🥋", color: "linear-gradient(135deg,#E85D04,#9D0208)", category: "Arcade", blurb: "2-player sword fighting on one keyboard.", controls: "keyboard" },
   { slug: "tower-defense", title: "Tower Defense", emoji: "🏰", color: "linear-gradient(135deg,#1899D6,#0B5FFF)", category: "Arcade", blurb: "Build towers and stop the enemy waves.", controls: "both" },

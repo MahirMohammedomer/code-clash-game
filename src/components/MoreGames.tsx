@@ -1,9 +1,21 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Gamepad2, History, Keyboard, Maximize, Pointer, RotateCcw, Search, X } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { ArrowLeft, Gamepad2, History, Keyboard, Maximize, Pointer, RotateCcw, Search, Sparkles, Trophy, X } from "lucide-react";
 import { MORE_GAMES, MORE_GAME_CATEGORIES, type MoreGame, type MoreGameCategory } from "@/lib/more-games";
+import { getBest } from "@/lib/arcade";
 import { soundEngine } from "@/lib/sound-effects";
+
+/** The six premium from-scratch remakes (code-split, loaded on demand). */
+const NATIVE_GAMES = {
+  g2048: dynamic(() => import("@/components/games/G2048"), { ssr: false }),
+  snake: dynamic(() => import("@/components/games/Snake"), { ssr: false }),
+  flappy: dynamic(() => import("@/components/games/Flappy"), { ssr: false }),
+  gems: dynamic(() => import("@/components/games/GemCrush"), { ssr: false }),
+  breakout: dynamic(() => import("@/components/games/Breakout"), { ssr: false }),
+  hopper: dynamic(() => import("@/components/games/SkyHopper"), { ssr: false }),
+} as const;
 
 const RECENT_KEY = "cipherclash_recent_games";
 const FAV_KEY = "cipherclash_favorite_games";
@@ -41,7 +53,16 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
   const [recent, setRecent] = useState<string[]>(() => loadList(RECENT_KEY));
   const [favorites, setFavorites] = useState<string[]>(() => loadList(FAV_KEY));
   const [isTouch, setIsTouch] = useState(false);
+  const [bestsTick, setBestsTick] = useState(0);
   const playerWrapRef = useRef<HTMLDivElement>(null);
+
+  const closePlayer = useCallback(() => {
+    setPlaying(null);
+    setBestsTick((t) => t + 1); // refresh best-score chips after a remake run
+  }, []);
+
+  const featuredGames = useMemo(() => MORE_GAMES.filter((g) => g.featured), []);
+  void bestsTick;
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time environment probe
@@ -102,10 +123,25 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
         style={{ background: g.color }}
         aria-hidden
       >
-        <span className="drop-shadow-[0_3px_3px_rgba(0,0,0,0.35)]">{g.emoji}</span>
+        {g.thumb ? (
+          // eslint-disable-next-line @next/next/no-img-element -- static illustrated thumbnail
+          <img src={g.thumb} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+        ) : (
+          <span className="drop-shadow-[0_3px_3px_rgba(0,0,0,0.35)]">{g.emoji}</span>
+        )}
+        {g.native && (
+          <span className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-md text-white" style={{ background: "linear-gradient(90deg,#FF4B6E,#A560E8)" }}>
+            <Sparkles size={10} /> Remake
+          </span>
+        )}
         <span className="absolute bottom-1.5 left-1.5">
           <ControlsBadge controls={g.controls} />
         </span>
+        {g.native && getBest(g.native) > 0 && (
+          <span className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded-md" style={{ background: "rgba(255,200,0,0.92)", color: "#5A3A00" }}>
+            <Trophy size={10} /> {getBest(g.native).toLocaleString()}
+          </span>
+        )}
       </span>
       <span className="font-display font-semibold block leading-tight mt-2 pr-5">{g.title}</span>
       <span className="text-[11px] font-bold block leading-snug mt-0.5" style={{ color: "var(--ink-soft)" }}>
@@ -176,6 +212,54 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
         ))}
       </div>
 
+      {/* featured remakes rail */}
+      {cat === "All" && !query && (
+        <div className="mb-5">
+          <h3 className="font-display font-semibold flex items-center gap-1.5 mb-1">
+            <Sparkles size={17} style={{ color: "#FF4B6E" }} /> Featured Remakes
+            <span className="text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full text-white" style={{ background: "linear-gradient(90deg,#FF4B6E,#A560E8)" }}>Rebuilt ★</span>
+          </h3>
+          <p className="text-xs font-bold mb-2.5" style={{ color: "var(--ink-soft)" }}>
+            Our six most-loved games, rebuilt from scratch — smoother, prettier, with high scores!
+          </p>
+          <div className="flex gap-2.5 overflow-x-auto no-scrollbar pb-1 -mx-3 px-3 sm:mx-0 sm:px-0">
+            {featuredGames.map((g) => {
+              const best = g.native ? getBest(g.native) : 0;
+              return (
+                <button
+                  key={g.slug}
+                  type="button"
+                  onClick={() => play(g)}
+                  className="card-game shrink-0 w-[218px] sm:w-[248px] p-2.5 text-left active:scale-[0.97] transition-transform hover:-translate-y-0.5 relative overflow-hidden"
+                >
+                  <span className="block w-full aspect-[16/10] rounded-2xl overflow-hidden relative" aria-hidden>
+                    {g.thumb ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- static illustrated thumbnail
+                      <img src={g.thumb} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <span className="absolute inset-0 flex items-center justify-center text-5xl" style={{ background: g.color }}>{g.emoji}</span>
+                    )}
+                    <span className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-md text-white" style={{ background: "linear-gradient(90deg,#FF4B6E,#A560E8)" }}>
+                      <Sparkles size={10} /> Remake
+                    </span>
+                    {best > 0 && (
+                      <span className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-md" style={{ background: "rgba(255,200,0,0.94)", color: "#5A3A00" }}>
+                        <Trophy size={11} /> {best.toLocaleString()}
+                      </span>
+                    )}
+                  </span>
+                  <span className="font-display font-semibold block leading-tight mt-2">{g.title}</span>
+                  <span className="text-[11px] font-bold block leading-snug mt-0.5" style={{ color: "var(--ink-soft)" }}>
+                    {g.blurb.replace("REMAKE ★ ", "")}
+                  </span>
+                  <span className="btn-game btn-green inline-flex px-3.5 py-1.5 mt-2 text-xs">▶ Play</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* recently played */}
       {cat === "All" && !query && recentGames.length > 0 && (
         <div className="mb-4">
@@ -209,7 +293,7 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
-          {filtered.map(tile)}
+          {(cat === "All" && !query ? filtered.filter((g) => !g.featured) : filtered).map(tile)}
         </div>
       )}
 
@@ -218,14 +302,21 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
         Each game keeps its own authors and credits.
       </p>
 
-      {/* ------------------------------- player ------------------------------- */}
-      {playing && (
+      {/* ----------------------- native remake player ----------------------- */}
+      {playing?.native &&
+        (() => {
+          const NativeGame = NATIVE_GAMES[playing.native];
+          return <NativeGame onBack={closePlayer} />;
+        })()}
+
+      {/* ---------------------------- iframe player ---------------------------- */}
+      {playing && !playing.native && (
         <div className="fixed inset-0 z-[80] flex flex-col animate-fade" style={{ background: "#14152B" }}>
           <div className="flex items-center gap-2 px-3 py-2.5 shrink-0" style={{ background: "rgba(255,255,255,0.06)", borderBottom: "2px solid rgba(255,255,255,0.12)" }}>
             <button
               onClick={() => {
                 soundEngine.playTap(420);
-                setPlaying(null);
+                closePlayer();
               }}
               className="btn-game w-10 h-10 !rounded-xl flex items-center justify-center shrink-0"
               style={{ background: "#26283B", color: "#fff", border: "2px solid rgba(255,255,255,0.25)", boxShadow: "0 3px 0 rgba(0,0,0,0.4)" }}
