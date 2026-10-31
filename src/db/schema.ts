@@ -53,6 +53,9 @@ export const players = pgTable("players", {
   claimedDailyQuests: jsonb("claimed_daily_quests").$type<string[]>().notNull().default([]),
   dailyStats: jsonb("daily_stats").$type<DailyStats>(),
   dailyChallengeDone: text("daily_challenge_done"),
+  dailyCodeDone: text("daily_code_done"), // 'YYYY-MM-DD' of last solved Daily Code
+  seasonId: text("season_id").notNull().default(""), // '' = pre-seasons (no reset on first sight)
+  seasonPeakTrophies: integer("season_peak_trophies").notNull().default(0),
   coins: integer("coins").notNull().default(0),
   gems: integer("gems").notNull().default(0),
   streakDays: integer("streak_days").notNull().default(1),
@@ -121,6 +124,7 @@ export const matches = pgTable("matches", {
   winnerName: text("winner_name"),
   endReason: text("end_reason"),
   tournamentId: integer("tournament_id"),
+  raceCode: text("race_code"), // shared secret for online_race mode (never exposed until finished)
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -135,7 +139,7 @@ export const tournaments = pgTable("tournaments", {
   secretCode: text("secret_code").notNull(),
   prizeCoins: integer("prize_coins").notNull().default(500),
   prizeGems: integer("prize_gems").notNull().default(25),
-  participants: jsonb("participants").$type<unknown[]>().notNull().default([]),
+  participants: jsonb("participants").$type<HuntParticipant[]>().notNull().default([]),
   bracketMatches: jsonb("bracket_matches").$type<unknown[]>().notNull().default([]),
   createdBy: text("created_by").notNull(),
   endsAt: timestamp("ends_at").defaultNow().notNull(),
@@ -198,5 +202,65 @@ export const resultLog = pgTable("result_log", {
   id: serial("id").primaryKey(),
   resultId: text("result_id").notNull().unique(),
   playerId: integer("player_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/* ---------------------------- v4 social update ---------------------------- */
+
+export interface HuntParticipant {
+  key: string; // "p<playerId>" for registered, "g<guestKey>" for guests
+  playerId: number | null;
+  username: string;
+  avatar: AvatarConfig;
+  guesses: { guess: string; points: number; orders: number }[];
+  solved: boolean;
+  solvedAt?: string;
+  joinedAt: string;
+}
+
+/** 1v1 challenges + rematches between registered players. */
+export const matchInvites = pgTable("match_invites", {
+  id: serial("id").primaryKey(),
+  fromPlayerId: integer("from_player_id").notNull(),
+  toPlayerId: integer("to_player_id").notNull(),
+  fromName: text("from_name").notNull(),
+  fromAvatarConfig: jsonb("from_avatar_config").$type<AvatarConfig>(),
+  fromFrame: text("from_frame").notNull().default("frame_emerald"),
+  timerSeconds: integer("timer_seconds").notNull().default(45),
+  kind: text("kind").notNull().default("challenge"), // "challenge" | "rematch"
+  status: text("status").notNull().default("pending"), // pending | accepted | declined | expired | cancelled
+  roomCode: text("room_code"),
+  p1Token: text("p1_token"),
+  p2Token: text("p2_token"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+});
+
+/** Durable per-player match records powering replays + head-to-head stats. */
+export const matchHistory = pgTable("match_history", {
+  id: serial("id").primaryKey(),
+  historyId: text("history_id").notNull().unique(),
+  playerId: integer("player_id").notNull(),
+  opponentPlayerId: integer("opponent_player_id"),
+  opponentName: text("opponent_name").notNull(),
+  opponentAvatar: jsonb("opponent_avatar").$type<AvatarConfig>(),
+  myAvatar: jsonb("my_avatar").$type<AvatarConfig>(),
+  mode: text("mode").notNull().default("ai"),
+  result: text("result").notNull().default("win"), // win | loss | draw
+  mySecret: text("my_secret").notNull().default(""),
+  oppSecret: text("opp_secret").notNull().default(""),
+  guesses: jsonb("guesses").$type<MatchGuessEntry[]>().notNull().default([]),
+  endReason: text("end_reason"),
+  turnsTaken: integer("turns_taken").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/** Web Push subscriptions (one per browser/device). */
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: serial("id").primaryKey(),
+  playerId: integer("player_id").notNull(),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

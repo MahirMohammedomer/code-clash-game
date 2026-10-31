@@ -6,16 +6,29 @@ import {
   Globe, GraduationCap, KeyRound, Loader2, Lock, LogOut, Medal, MessageSquare,
   Moon, Play, Plus, Settings, Shield, ShoppingBag, Star, Sun, Swords, Target, Trophy,
   User, Users, Volume2, VolumeX, Zap, Crown, Timer, Sparkles, X, DoorOpen,
+  Bell, BellOff, Eye, History, QrCode, UserPlus, Wifi,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import GameBoard, { type GameConfig, type GameOutcome } from "@/components/GameBoard";
-import Shop from "@/components/Shop";
-import Community from "@/components/Community";
-import Tutorial from "@/components/Tutorial";
+
+// Heavy screens are code-split so the first load stays snappy.
+const Shop = dynamic(() => import("@/components/Shop"), { loading: () => <ScreenLoading label="Opening the shop..." /> });
+const Community = dynamic(() => import("@/components/Community"), { loading: () => <ScreenLoading label="Loading community..." /> });
+const Tutorial = dynamic(() => import("@/components/Tutorial"), { loading: () => <ScreenLoading label="Loading the guide..." /> });
+const Friends = dynamic(() => import("@/components/Friends"), { loading: () => <ScreenLoading label="Finding your friends..." /> });
+const PlayerCard = dynamic(() => import("@/components/PlayerCard"), { loading: () => null });
+const PeerLocal = dynamic(() => import("@/components/PeerLocal"), { loading: () => <ScreenLoading label="Warming up local WiFi play..." /> });
+const Spectate = dynamic(() => import("@/components/Spectate"), { loading: () => <ScreenLoading label="Grabbing a front-row seat..." /> });
+const MatchHistory = dynamic(() => import("@/components/MatchHistory"), { loading: () => <ScreenLoading label="Loading your replays..." /> });
+const DailyCode = dynamic(() => import("@/components/DailyCode"), { loading: () => <ScreenLoading label="Hiding today's code..." /> });
+const Tournament = dynamic(() => import("@/components/Tournament"), { loading: () => <ScreenLoading label="Loading hunts..." /> });
 import { Character, CharacterAvatar } from "@/components/Character";
 import {
-  ACHIEVEMENTS, AI_BOTS, DAILY_QUESTS, DIVISIONS, emptyDailyStats, getDailyChallenge,
+  ACHIEVEMENTS, AI_BOTS, DAILY_QUESTS, DIVISIONS, currentSeasonId, emptyDailyStats, getDailyChallenge,
+  seasonDaysLeft, seasonLabel,
   getDivisionForTrophies, getShopItem, nextDivision, type AIDifficulty, type CosmeticItem,
 } from "@/lib/game-engine";
+import { historyPayload, saveLocalHistoryEntry } from "@/lib/history";
 import { normalizeAvatar } from "@/lib/avatar";
 import {
   clearPendingResults, clearSession, lastUsername, loadGuestProfile, loadPendingResults,
@@ -23,9 +36,9 @@ import {
   saveRoomSession, saveSession, tzEastMinutes, type SessionData,
 } from "@/lib/session";
 import { soundEngine } from "@/lib/sound-effects";
-import type { LeaderboardRow, Player, RoomSession } from "@/lib/types";
+import type { InviteView, LeaderboardRow, Player, RoomSession, SeasonInfo, SocialPlayer } from "@/lib/types";
 
-type Screen = "boot" | "welcome" | "home" | "shop" | "rank" | "community" | "game";
+type Screen = "boot" | "welcome" | "home" | "shop" | "rank" | "community" | "game" | "friends" | "history" | "dailycode" | "tournaments" | "spectate";
 
 interface Toast { id: number; msg: string; kind: "ok" | "err" }
 
@@ -42,6 +55,15 @@ function DivisionBadge({ trophies, size = "md" }: { trophies: number; size?: "sm
       style={{ background: div.gradient, textShadow: "0 1px 2px rgba(0,0,0,.35)" }}>
       <Shield size={size === "sm" ? 11 : 13} strokeWidth={2.8} /> {div.name}
     </span>
+  );
+}
+
+function ScreenLoading({ label }: { label: string }) {
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-16 text-center animate-fade">
+      <Loader2 className="animate-spin mx-auto" size={30} style={{ color: "var(--brand)" }} />
+      <p className="font-black mt-3" style={{ color: "var(--ink-soft)" }}>{label}</p>
+    </div>
   );
 }
 
@@ -125,6 +147,7 @@ function equipOnPlayer(p: Player, item: CosmeticItem): Player {
     case "avatar_base": next.avatarConfig.base = item.meta; break;
     case "avatar_color": next.avatarConfig.color = item.meta; break;
     case "avatar_accessory": next.avatarConfig.accessory = item.meta; break;
+    case "avatar_pattern": next.avatarConfig.pattern = item.meta; break;
     case "frame": next.frameId = item.id; break;
     case "theme": next.themeId = item.id; break;
     case "effect": next.effectId = item.id; break;
@@ -152,6 +175,23 @@ export default function Page() {
   const [showIosInstall, setShowIosInstall] = useState(false);
   const [roomResume, setRoomResume] = useState<RoomSession | null>(null);
   const [stageMood, setStageMood] = useState<"idle" | "happy" | "win">("idle");
+  const [season, setSeason] = useState<SeasonInfo | null>(null);
+  const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);
+  const [spectateRoom, setSpectateRoom] = useState("");
+  const [incomingInvites, setIncomingInvites] = useState<InviteView[]>([]);
+  const [socialFollowing, setSocialFollowing] = useState<SocialPlayer[] | null>(null);
+  const [friendsOnline, setFriendsOnline] = useState(0);
+  const [pushOn, setPushOn] = useState(false);
+  const [pushSupported, setPushSupported] = useState(false);
+
+  const lastSeasonToastRef = useRef("");
+  const seenOnlineRef = useRef<Set<number>>(new Set());
+  const seenInviteIdsRef = useRef<Set<number>>(new Set());
+  const socialInitRef = useRef(false);
+  const enteredInviteRef = useRef<number | null>(null);
+  const screenRef = useRef(screen);
+  // eslint-disable-next-line react-hooks/refs
+  screenRef.current = screen;
 
   const [installEvt, setInstallEvt] = useState<{ prompt: () => void; userChoice: Promise<{ outcome: string }> } | null>(null);
   const [lastTimer, setLastTimer] = useState(45);
@@ -163,6 +203,19 @@ export default function Page() {
   }, []);
 
   const token = session?.token || null;
+
+  /** Store season info and celebrate a rollover exactly once per season. */
+  const applySeasonToUi = useCallback((info: SeasonInfo) => {
+    setSeason(info);
+    if (info.rolled && lastSeasonToastRef.current !== info.id) {
+      lastSeasonToastRef.current = info.id;
+      const r = info.rolled;
+      setTimeout(() => {
+        showToast(`🏁 New season! You finished ${r.prevDivision} — +${r.coins} coins${r.gems ? ` +${r.gems} gems` : ""}. Trophies reset to ${r.trophiesResetTo}. Climb again!`);
+        soundEngine.playReward();
+      }, 900);
+    }
+  }, [showToast]);
 
   /* ------------------------------ boot ------------------------------ */
   useEffect(() => {
@@ -224,6 +277,7 @@ export default function Page() {
         const p = { ...(data.currentPlayer as Player), avatarConfig: normalizeAvatar(data.currentPlayer.avatarConfig) };
         setMe(p);
         setLeaderboard(data.leaderboard || []);
+        if (data.season) applySeasonToUi(data.season as SeasonInfo);
         setScreen("home");
         setRoomResume(loadRoomSession());
         if (data.streakInfo?.isNewDay) {
@@ -274,8 +328,9 @@ export default function Page() {
       const data = await res.json();
       if (data.currentPlayer) setMe({ ...data.currentPlayer, avatarConfig: normalizeAvatar(data.currentPlayer.avatarConfig) });
       if (data.leaderboard) setLeaderboard(data.leaderboard);
+      if (data.season) applySeasonToUi(data.season as SeasonInfo);
     } catch {}
-  }, [token]);
+  }, [token, applySeasonToUi]);
 
   /* ------------------------------ auth ------------------------------ */
   const doAuth = async (mode: "login" | "register" | "guest", username: string, password: string) => {
@@ -305,6 +360,7 @@ export default function Page() {
       if (data.streakInfo?.isNewDay) setTimeout(() => showToast(`Day ${data.streakInfo.streakDays} streak! +${data.streakInfo.bonusCoins} coins`), 500);
       fetch("/api/state").then((r) => r.json()).then((d) => setLeaderboard(d.leaderboard || [])).catch(() => {});
     }
+    if (data.season) applySeasonToUi(data.season as SeasonInfo);
     setScreen("home");
     soundEngine.playJoin();
     if (!player.tutorialSeen) setTimeout(() => setShowTutorial(true), 400);
@@ -314,6 +370,11 @@ export default function Page() {
     clearSession();
     setSession(null);
     setMe(null);
+    setSeason(null);
+    setIncomingInvites([]);
+    setSocialFollowing(null);
+    setFriendsOnline(0);
+    setProfilePlayerId(null);
     setShowSettings(false);
     setShowProfile(false);
     setScreen("welcome");
@@ -322,6 +383,8 @@ export default function Page() {
   /* --------------------------- results --------------------------- */
   const handleResult = useCallback(async (outcome: GameOutcome) => {
     if (!me) return;
+    // Always keep a local replay copy (works offline & for guests too).
+    if (outcome.history) saveLocalHistoryEntry(outcome.history);
     if (session?.isGuest || !token) {
       const updated = applyResultToGuest(me, outcome);
       const newOnes = updated.completedAchievements.filter((a) => !me.completedAchievements.includes(a));
@@ -339,11 +402,13 @@ export default function Page() {
       ordersTotal: outcome.ordersTotal, aiDifficulty: outcome.aiDifficulty,
       trophyDelta: outcome.trophyDelta, coinsEarned: outcome.coinsEarned,
       xpEarned: outcome.xpEarned, dailyChallengeId: outcome.dailyChallengeId,
+      history: outcome.history ? historyPayload(outcome.history) : undefined,
     };
     try {
       const res = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, token }) });
       const data = await res.json();
       if (data.player) setMe({ ...data.player, avatarConfig: normalizeAvatar(data.player.avatarConfig) });
+      if (data.season) applySeasonToUi(data.season as SeasonInfo);
       if (Array.isArray(data.unlocked)) {
         for (const id of data.unlocked) {
           const ach = ACHIEVEMENTS.find((a) => a.id === id);
@@ -354,7 +419,7 @@ export default function Page() {
     } catch {
       queuePendingResult(payload);
     }
-  }, [me, session, token, showToast]);
+  }, [me, session, token, showToast, applySeasonToUi]);
 
   /* --------------------------- shop actions --------------------------- */
   const handleBuy = async (item: CosmeticItem) => {
@@ -463,6 +528,52 @@ export default function Page() {
     soundEngine.playTap(600);
   };
 
+  /* --------------------------- push notifications --------------------------- */
+  const refreshPushState = useCallback(async () => {
+    try {
+      const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+      setPushSupported(supported);
+      if (!supported) return;
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      setPushOn(!!sub && Notification.permission === "granted");
+    } catch {}
+  }, []);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- read push subscription status when settings open
+  useEffect(() => { if (showSettings) void refreshPushState(); }, [showSettings, refreshPushState]);
+
+  const togglePush = async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) {
+        await fetch("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "unsubscribe", endpoint: existing.endpoint }) }).catch(() => {});
+        await existing.unsubscribe();
+        setPushOn(false);
+        showToast("Notifications off 🔕");
+        return;
+      }
+      const cfg = await fetch("/api/push").then((r) => r.json()).catch(() => null);
+      if (!cfg?.publicKey) { showToast("Push isn't enabled on this server yet 🔕", "err"); return; }
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") { showToast("Notifications are blocked by your browser", "err"); return; }
+      const key = cfg.publicKey as string;
+      const pad = "=".repeat((4 - (key.length % 4)) % 4);
+      const raw = atob((key + pad).replace(/-/g, "+").replace(/_/g, "/"));
+      const appKey = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) appKey[i] = raw.charCodeAt(i);
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey.buffer as ArrayBuffer });
+      const res = await fetch("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "subscribe", token, subscription: sub.toJSON() }) });
+      if (!res.ok) throw new Error("save failed");
+      setPushOn(true);
+      showToast("Notifications on! 🔔 We'll ping you for challenges.");
+      soundEngine.playReward();
+    } catch {
+      showToast("Couldn't change notification settings", "err");
+    }
+  };
+
   /* --------------------------- game starters --------------------------- */
   const startAI = (difficulty: AIDifficulty, timer: number, daily?: { rule: GameConfig["dailyRule"]; id: string }) => {
     setLastTimer(timer);
@@ -479,15 +590,15 @@ export default function Page() {
     setScreen("game");
   };
 
-  const enterOnline = (room: RoomSession & { timerSeconds?: number }) => {
+  const enterOnline = (room: RoomSession & { timerSeconds?: number }, race = false) => {
     saveRoomSession(room);
     setRoomResume(room);
-    setGameConfig({ mode: "online", roomCode: room.roomCode, slot: room.slot, token: room.token, timerSeconds: room.timerSeconds || 45 });
+    setGameConfig({ mode: "online", roomCode: room.roomCode, slot: room.slot, token: room.token, timerSeconds: room.timerSeconds || 45, race });
     setShowPlaySheet(false);
     setScreen("game");
   };
 
-  const startOnlineAction = async (action: "quick_match" | "create_room" | "join_room", timer: number, joinCode?: string) => {
+  const startOnlineAction = async (action: "quick_match" | "create_room" | "join_room", timer: number, joinCode?: string, mode: "duel" | "race" = "duel") => {
     if (!me) return;
     setLastTimer(timer);
     const body: Record<string, unknown> = {
@@ -499,6 +610,7 @@ export default function Page() {
       playerId: me.id,
       timerSeconds: timer,
       isPrivate: action === "create_room",
+      mode: mode === "race" ? "race" : "duel",
     };
     if (action === "join_room") {
       body.roomCode = joinCode;
@@ -508,7 +620,7 @@ export default function Page() {
     const res = await fetch("/api/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Could not start online match");
-    enterOnline({ roomCode: data.match.roomCode, slot: data.slot, token: data.token, savedAt: Date.now(), timerSeconds: data.match.timerSeconds });
+    enterOnline({ roomCode: data.match.roomCode, slot: data.slot, token: data.token, savedAt: Date.now(), timerSeconds: data.match.timerSeconds }, mode === "race");
     if (data.joined) showToast("Rival found! Hide your code!");
   };
 
@@ -519,6 +631,132 @@ export default function Page() {
       startOnlineAction("quick_match", lastTimer || 45).catch((e) => showToast(e.message || "Matchmaking failed", "err"));
     }, 250);
   };
+
+  const startRace = (difficulty: AIDifficulty) => {
+    setGameConfig({ mode: "race", aiDifficulty: difficulty, timerSeconds: lastTimer || 45 });
+    setShowPlaySheet(false);
+    setScreen("game");
+    soundEngine.playTap(660);
+  };
+
+  const startPeer = (timer: number) => {
+    setLastTimer(timer);
+    setGameConfig({ mode: "peer", timerSeconds: timer });
+    setShowPlaySheet(false);
+    setScreen("game");
+    soundEngine.playTap(660);
+  };
+
+  const startSpectate = (roomCode: string) => {
+    setSpectateRoom(roomCode);
+    setProfilePlayerId(null);
+    setScreen("spectate");
+  };
+
+  /** Accept/decline a challenge invite; accepting jumps straight into the room. */
+  const answerInvite = async (invite: InviteView, acceptIt: boolean) => {
+    if (!token) return;
+    setIncomingInvites((list) => list.filter((i) => i.id !== invite.id));
+    soundEngine.playTap(acceptIt ? 700 : 420);
+    try {
+      const res = await fetch("/api/social", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "respond_invite", token, inviteId: invite.id, accept: acceptIt }),
+      });
+      const data = await res.json();
+      if (!acceptIt) return;
+      if (res.ok && data.roomCode && data.token) {
+        enterOnline({ roomCode: data.roomCode, slot: data.slot || 2, token: data.token, savedAt: Date.now(), timerSeconds: data.invite?.timerSeconds || 45 });
+        showToast("⚔️ Let's clash!");
+      } else {
+        showToast(data.error || "That challenge is gone", "err");
+      }
+    } catch {
+      if (acceptIt) showToast("Connection failed — try again", "err");
+    }
+  };
+
+  /* Social poller: invites, friends online, accepted challenges auto-join. */
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    const poll = async () => {
+      if (document.visibilityState === "hidden") return;
+      try {
+        const res = await fetch(`/api/social?token=${token}`);
+        const data = await res.json();
+        if (!alive || !res.ok) return;
+        const following: SocialPlayer[] = data.following || [];
+        setSocialFollowing(following);
+        setFriendsOnline(following.filter((f) => f.isOnline).length);
+
+        const incoming: InviteView[] = (data.invitesIn || []).filter((i: InviteView) => i.status === "pending");
+        const fresh = incoming.find((i) => !seenInviteIdsRef.current.has(i.id));
+        incoming.forEach((i) => seenInviteIdsRef.current.add(i.id));
+        setIncomingInvites(incoming);
+        if (fresh && screenRef.current !== "game") soundEngine.playJoin();
+
+        const nowOnline = following.filter((f) => f.isOnline);
+        if (socialInitRef.current && screenRef.current !== "game") {
+          for (const f of nowOnline) {
+            if (!seenOnlineRef.current.has(f.id)) showToast(`🟢 ${f.username} is online!`);
+          }
+        }
+        seenOnlineRef.current = new Set(nowOnline.map((f) => f.id));
+        socialInitRef.current = true;
+
+        const acc = (data.invitesOut || []).find((i: InviteView) => i.status === "accepted" && i.myToken && i.roomCode);
+        if (acc && enteredInviteRef.current !== acc.id && screenRef.current !== "game" && screenRef.current !== "spectate") {
+          enteredInviteRef.current = acc.id;
+          enterOnline({ roomCode: acc.roomCode as string, slot: acc.mySlot || 1, token: acc.myToken as string, savedAt: Date.now(), timerSeconds: acc.timerSeconds });
+          showToast("⚔️ Challenge accepted — hide your code!");
+        }
+      } catch {}
+    };
+    poll();
+    const t = setInterval(poll, 10000);
+    const onVis = () => { if (document.visibilityState === "visible") poll(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { alive = false; clearInterval(t); document.removeEventListener("visibilitychange", onVis); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  /* Deep links from push notifications (?go=...) + SW focus messages. */
+  useEffect(() => {
+    const applyGo = (go: string | null) => {
+      if (go === "friends") setScreen("friends");
+      else if (go === "tournaments") setScreen("tournaments");
+      else if (go === "dailycode") setScreen("dailycode");
+      else if (go === "home") setScreen("home");
+    };
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const go = params.get("go");
+      if (go) {
+        window.history.replaceState({}, "", window.location.pathname);
+        applyGo(go);
+      }
+    } catch {}
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === "notification-click" && typeof e.data.url === "string") {
+        try { applyGo(new URL(e.data.url, window.location.origin).searchParams.get("go")); } catch {}
+      }
+    };
+    navigator.serviceWorker?.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker?.removeEventListener("message", onMsg);
+  }, []);
+
+  /** Guests get Daily Code rewards applied locally (accounts use the server). */
+  const handleGuestDaily = useCallback((won: boolean, used: number) => {
+    if (!me) return;
+    const coins = won ? 50 + Math.max(0, 8 - used) * 10 : 10;
+    const xp = won ? 70 : 20;
+    const newXp = me.xp + xp;
+    const updated = { ...me, coins: me.coins + coins, xp: newXp, level: Math.max(me.level, Math.floor(newXp / 200) + 1) };
+    saveGuestProfile(updated);
+    setMe(updated);
+    showToast(won ? `☀️ Daily Code cracked! +${coins} coins` : `☀️ Daily Code played! +${coins} coins`);
+  }, [me, showToast]);
 
   const finishTutorial = async (goTo: "bot" | "home" | "skip") => {
     setShowTutorial(false);
@@ -552,17 +790,43 @@ export default function Page() {
     return <Welcome doAuth={doAuth} showToast={showToast} toasts={toasts} />;
   }
 
+  if (screen === "spectate" && spectateRoom) {
+    return (
+      <>
+        <Spectate
+          roomCode={spectateRoom}
+          me={me}
+          onExit={() => setScreen("home")}
+          showToast={showToast}
+        />
+        <Toasts toasts={toasts} />
+      </>
+    );
+  }
+
   if (screen === "game" && gameConfig) {
     return (
       <>
-        <GameBoard
-          me={me}
-          config={gameConfig}
-          onExit={() => { setScreen("home"); setGameConfig(null); setRoomResume(loadRoomSession()); refreshState(); }}
-          onResult={handleResult}
-          onPlayAgainOnline={playAgainOnline}
-          showToast={showToast}
-        />
+        {gameConfig.mode === "peer" ? (
+          <PeerLocal
+            me={me}
+            config={gameConfig}
+            onExit={() => { setScreen("home"); setGameConfig(null); refreshState(); }}
+            onResult={handleResult}
+            showToast={showToast}
+          />
+        ) : (
+          <GameBoard
+            me={me}
+            config={gameConfig}
+            onExit={() => { setScreen("home"); setGameConfig(null); setRoomResume(loadRoomSession()); refreshState(); }}
+            onResult={handleResult}
+            onPlayAgainOnline={playAgainOnline}
+            showToast={showToast}
+            authToken={token}
+            onEnterRoom={(room) => enterOnline(room)}
+          />
+        )}
         <Toasts toasts={toasts} />
       </>
     );
@@ -607,6 +871,14 @@ export default function Page() {
           <span className="chip px-2.5 py-1.5 font-black text-sm hidden sm:flex items-center gap-1" title="Gems">
             <Gem size={16} style={{ color: "#1CB0F6" }} /> {me.gems.toLocaleString()}
           </span>
+          <button onClick={() => setScreen("friends")} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center relative" title="Friends">
+            <Users size={17} strokeWidth={2.6} />
+            {(friendsOnline > 0 || incomingInvites.length > 0) && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[9px] font-black flex items-center justify-center animate-pop" style={{ background: incomingInvites.length ? "#FF4B4B" : "#58CC02" }}>
+                {incomingInvites.length || friendsOnline}
+              </span>
+            )}
+          </button>
           <button onClick={() => setTheme(!isDark)} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center" title={isDark ? "Switch to light mode" : "Switch to dark mode"}>
             {isDark ? <Sun size={17} strokeWidth={2.6} /> : <Moon size={17} strokeWidth={2.6} />}
           </button>
@@ -632,6 +904,21 @@ export default function Page() {
               <button onClick={() => enterOnline(roomResume)} className="btn-game btn-gold px-4 py-2.5">Rejoin</button>
             </div>
           )}
+
+          {/* season banner */}
+          {(() => {
+            const sInfo: SeasonInfo = season ?? { id: currentSeasonId(), label: seasonLabel(currentSeasonId()), daysLeft: seasonDaysLeft() };
+            return (
+              <div className="card-game p-3 mb-3 flex items-center gap-3" style={{ background: "linear-gradient(135deg, rgba(255,200,0,.20), rgba(165,96,232,.14))" }}>
+                <span className="text-[26px] leading-none" aria-hidden>🏁</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-display font-semibold leading-tight">{sInfo.label}</p>
+                  <p className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>{sInfo.daysLeft} days left — higher division = bigger end-of-season rewards!</p>
+                </div>
+                <DivisionBadge trophies={me.trophies} />
+              </div>
+            );
+          })()}
 
           <div className="grid lg:grid-cols-[380px_1fr] gap-4 items-start">
             {/* character stage */}
@@ -675,6 +962,28 @@ export default function Page() {
                 <Play size={30} strokeWidth={2.8} fill="#fff" /> PLAY
               </button>
 
+              {/* friends online */}
+              {token && socialFollowing && socialFollowing.some((f) => f.isOnline) && (
+                <div className="card-game p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-display font-semibold flex items-center gap-1.5"><Users size={17} style={{ color: "#58CC02" }} /> Friends online</h3>
+                    <button onClick={() => setScreen("friends")} className="text-xs font-black flex items-center gap-0.5" style={{ color: "var(--blue)" }}>All friends <ChevronRight size={13} strokeWidth={3} /></button>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto no-scrollbar pb-0.5">
+                    {socialFollowing.filter((f) => f.isOnline).slice(0, 10).map((f) => (
+                      <button key={f.id} onClick={() => setProfilePlayerId(f.id)} className="flex flex-col items-center shrink-0 w-[62px] active:scale-95 transition-transform">
+                        <span className="relative">
+                          <CharacterAvatar config={f.avatarConfig} frameId={f.frameId} size={48} ringWidth={3} />
+                          <span className="absolute bottom-0.5 right-0.5 w-3 h-3 rounded-full border-2 border-white" style={{ background: f.inMatchRoom ? "#FFC800" : "#58CC02" }} />
+                        </span>
+                        <span className="font-black text-[10px] mt-1 truncate w-full text-center">{f.username}</span>
+                        <span className="text-[8px] font-black uppercase tracking-wide" style={{ color: f.inMatchRoom ? "#E0A800" : "#58CC02" }}>{f.inMatchRoom ? "In match" : "Online"}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* daily challenge */}
               <div className="card-game p-3.5 flex items-center gap-3">
                 <span className="w-12 h-12 rounded-2xl flex items-center justify-center text-white shrink-0" style={{ background: dailyDone ? "#58CC02" : "var(--orange)" }}>
@@ -696,6 +1005,20 @@ export default function Page() {
                   }}
                   className={`btn-game px-4 py-2.5 shrink-0 ${dailyDone ? "btn-ghost" : "btn-gold"}`}>
                   {dailyDone ? "Done!" : "Play"}
+                </button>
+              </div>
+
+              {/* Daily Code + Code Hunts */}
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => { setScreen("dailycode"); soundEngine.playTap(620); }} className="card-game p-3.5 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5">
+                  <span className="w-11 h-11 rounded-2xl flex items-center justify-center text-[22px] mb-2" style={{ background: "linear-gradient(135deg,#FFC800,#FF7A18)" }} aria-hidden>☀️</span>
+                  <span className="font-display font-semibold block leading-tight">Daily Code</span>
+                  <span className="text-[11px] font-bold block" style={{ color: "var(--ink-soft)" }}>One puzzle a day — 8 tries, up to 120 coins!</span>
+                </button>
+                <button onClick={() => { setScreen("tournaments"); soundEngine.playTap(620); }} className="card-game p-3.5 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5">
+                  <span className="w-11 h-11 rounded-2xl flex items-center justify-center text-[22px] mb-2" style={{ background: "linear-gradient(135deg,#A560E8,#FF4B6E)" }} aria-hidden>🏆</span>
+                  <span className="font-display font-semibold block leading-tight">Code Hunts</span>
+                  <span className="text-[11px] font-bold block" style={{ color: "var(--ink-soft)" }}>First to crack the hunt code wins the prize pot!</span>
                 </button>
               </div>
 
@@ -758,6 +1081,8 @@ export default function Page() {
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {[
                   { label: "Shop", icon: ShoppingBag, color: "#A560E8", go: () => setScreen("shop") },
+                  { label: "Friends", icon: UserPlus, color: "#58CC02", go: () => setScreen("friends") },
+                  { label: "Replays", icon: History, color: "#7B5CFF", go: () => setScreen("history") },
                   { label: "Rankings", icon: Trophy, color: "#E0A800", go: () => setScreen("rank") },
                   { label: "How to Play", icon: GraduationCap, color: "#1CB0F6", go: () => setShowTutorial(true) },
                   { label: "Reviews", icon: Star, color: "#FFC800", go: () => { setCommunityTab("reviews"); setScreen("community"); } },
@@ -797,13 +1122,14 @@ export default function Page() {
                   </div>
                   <div className="space-y-1.5">
                     {leaderboard.slice(0, 5).map((r, i) => (
-                      <div key={r.id} className="flex items-center gap-2 px-2 py-1.5 rounded-xl" style={{ background: r.id === me.id ? "rgba(88,204,2,0.14)" : "var(--surface-3)" }}>
+                      <button key={r.id} type="button" onClick={() => { if (r.id !== me.id) setProfilePlayerId(r.id); }}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-xl w-full text-left active:scale-[0.99] transition-transform" style={{ background: r.id === me.id ? "rgba(88,204,2,0.14)" : "var(--surface-3)" }}>
                         <span className="font-display font-bold w-6 text-center" style={{ color: i === 0 ? "#E0A800" : "var(--ink-soft)" }}>{i + 1}</span>
                         <CharacterAvatar config={r.avatarConfig} frameId={r.frameId} size={32} ringWidth={2} />
                         <span className="font-black text-sm flex-1 truncate">{r.username}</span>
                         <DivisionBadge trophies={r.trophies} size="sm" />
                         <span className="font-black text-sm flex items-center gap-1"><Trophy size={13} style={{ color: "#E0A800" }} />{r.trophies}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -812,7 +1138,7 @@ export default function Page() {
           </div>
 
           <p className="text-center text-[11px] font-bold mt-8" style={{ color: "var(--ink-faint)" }}>
-            Cipher Clash v3 — hide your code, crack theirs, become a Legend.
+            Cipher Clash v4 — hide your code, crack theirs, become a Legend.
           </p>
         </main>
       )}
@@ -822,11 +1148,30 @@ export default function Page() {
       )}
 
       {screen === "rank" && (
-        <RankScreen leaderboard={leaderboard} me={me} onBack={() => setScreen("home")} onRefresh={refreshState} />
+        <RankScreen leaderboard={leaderboard} me={me} onBack={() => setScreen("home")} onRefresh={refreshState} onOpenPlayer={(id) => setProfilePlayerId(id)} />
       )}
 
       {screen === "community" && (
         <Community me={me} token={token} onBack={() => setScreen("home")} showToast={showToast} initialTab={communityTab} />
+      )}
+
+      {screen === "friends" && (
+        <Friends me={me} token={token} leaderboard={leaderboard} onBack={() => setScreen("home")} showToast={showToast}
+          onOpenPlayer={(id) => setProfilePlayerId(id)} onSpectate={startSpectate}
+          onEnterRoom={(room) => enterOnline(room)} />
+      )}
+
+      {screen === "history" && (
+        <MatchHistory me={me} token={token} onBack={() => setScreen("home")} />
+      )}
+
+      {screen === "dailycode" && (
+        <DailyCode me={me} token={token} onBack={() => setScreen("home")} showToast={showToast}
+          onPlayerUpdate={(p) => setMe({ ...p, avatarConfig: normalizeAvatar(p.avatarConfig) })} onGuestDaily={handleGuestDaily} />
+      )}
+
+      {screen === "tournaments" && (
+        <Tournament me={me} token={token} onBack={() => setScreen("home")} showToast={showToast} onRefresh={refreshState} />
       )}
 
       {showPlaySheet && (
@@ -836,6 +1181,8 @@ export default function Page() {
           onStartAI={startAI}
           onStartHotseat={startHotseat}
           onStartOnline={startOnlineAction}
+          onStartRace={startRace}
+          onStartPeer={startPeer}
           showToast={showToast}
         />
       )}
@@ -862,6 +1209,12 @@ export default function Page() {
                 {isDark ? <Sun size={19} /> : <Moon size={19} />} <span className="flex-1 text-left">Dark mode</span>
                 <span className="font-black text-xs" style={{ color: isDark ? "#58CC02" : "var(--ink-faint)" }}>{isDark ? "ON" : "OFF"}</span>
               </button>
+              {pushSupported && token && (
+                <button onClick={togglePush} className="btn-game btn-ghost w-full py-3 px-4 flex items-center gap-3">
+                  {pushOn ? <Bell size={19} /> : <BellOff size={19} />} <span className="flex-1 text-left">Challenge notifications</span>
+                  <span className="font-black text-xs" style={{ color: pushOn ? "#58CC02" : "var(--ink-faint)" }}>{pushOn ? "ON" : "OFF"}</span>
+                </button>
+              )}
               {!isStandalone && (
                 <button onClick={() => { setShowSettings(false); installApp(); }} className="btn-game btn-green w-full py-3 px-4 flex items-center gap-3">
                   <Download size={19} /> Install Cipher Clash app
@@ -877,7 +1230,7 @@ export default function Page() {
                 <LogOut size={19} /> {session?.isGuest ? "Exit guest mode" : "Log out"}
               </button>
             </div>
-            <p className="text-center text-[11px] font-bold mt-4" style={{ color: "var(--ink-faint)" }}>Cipher Clash v3.0</p>
+            <p className="text-center text-[11px] font-bold mt-4" style={{ color: "var(--ink-faint)" }}>Cipher Clash v4.0</p>
           </div>
         </div>
       )}
@@ -900,7 +1253,60 @@ export default function Page() {
         <Tutorial me={me} onFinish={(go) => finishTutorial(go)} onSkip={() => finishTutorial("skip")} />
       )}
 
+      {profilePlayerId !== null && (
+        <PlayerCard
+          playerId={profilePlayerId}
+          token={token}
+          meId={me.id}
+          onClose={() => setProfilePlayerId(null)}
+          showToast={showToast}
+          onEnterRoom={(room) => { setProfilePlayerId(null); enterOnline(room); }}
+          onSpectate={startSpectate}
+          onChallengeSent={() => showToast("⚔️ Challenge sent! Waiting for them to accept...")}
+        />
+      )}
+
+      {incomingInvites.length > 0 && (
+        <InvitePopup invite={incomingInvites[0]} onAnswer={answerInvite} />
+      )}
+
       <Toasts toasts={toasts} />
+    </div>
+  );
+}
+
+/* ------------------------------- Invite popup ------------------------------- */
+
+function InvitePopup({ invite, onAnswer }: { invite: InviteView; onAnswer: (inv: InviteView, acceptIt: boolean) => void }) {
+  const [leftSec, setLeftSec] = useState(75);
+  useEffect(() => {
+    const calc = () => Math.max(0, Math.round((new Date(invite.expiresAt).getTime() - Date.now()) / 1000));
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLeftSec(calc());
+    const t = setInterval(() => setLeftSec(calc()), 500);
+    return () => clearInterval(t);
+  }, [invite.id, invite.expiresAt]);
+  if (leftSec <= 0) return null;
+  return (
+    <div className="fixed inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[85] px-3 flex justify-center pointer-events-none">
+      <div className="card-game w-full max-w-md p-3.5 pointer-events-auto animate-pop" style={{ borderColor: "#A560E8", boxShadow: "0 12px 40px rgba(165,96,232,.4)" }}>
+        <div className="flex items-center gap-3">
+          <CharacterAvatar config={invite.fromAvatar} frameId={invite.fromFrame} size={52} ringWidth={3} mood="happy" />
+          <div className="flex-1 min-w-0">
+            <p className="font-display font-semibold leading-tight truncate">{invite.fromName} wants to clash! ⚔️</p>
+            <p className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>{invite.timerSeconds}s per turn · expires in {leftSec}s</p>
+            <div className="h-1.5 rounded-full mt-1.5 overflow-hidden" style={{ background: "var(--surface-3)" }}>
+              <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, (leftSec / 75) * 100)}%`, background: leftSec > 20 ? "#A560E8" : "#FF4B4B" }} />
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <button onClick={() => onAnswer(invite, false)} className="btn-game btn-ghost py-2.5">Not now</button>
+          <button onClick={() => onAnswer(invite, true)} className="btn-game btn-green py-2.5 flex items-center justify-center gap-1.5">
+            <Swords size={16} strokeWidth={2.7} /> Accept!
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1012,17 +1418,21 @@ function TimerChips({ options, value, set }: { options: number[]; value: number;
 
 /* ------------------------------- PlaySheet ------------------------------- */
 
-function PlaySheet({ me, onClose, onStartAI, onStartHotseat, onStartOnline, showToast }: {
+function PlaySheet({ me, onClose, onStartAI, onStartHotseat, onStartOnline, onStartRace, onStartPeer, showToast }: {
   me: Player;
   onClose: () => void;
   onStartAI: (d: AIDifficulty, timer: number) => void;
   onStartHotseat: (timer: number) => void;
-  onStartOnline: (action: "quick_match" | "create_room" | "join_room", timer: number, code?: string) => Promise<void>;
+  onStartOnline: (action: "quick_match" | "create_room" | "join_room", timer: number, code?: string, mode?: "duel" | "race") => Promise<void>;
+  onStartRace: (d: AIDifficulty) => void;
+  onStartPeer: (timer: number) => void;
   showToast: (m: string, k?: "ok" | "err") => void;
 }) {
-  const [step, setStep] = useState<"modes" | "bots" | "online" | "hotseat">("modes");
+  const [step, setStep] = useState<"modes" | "bots" | "online" | "hotseat" | "peer">("modes");
   const [bot, setBot] = useState<AIDifficulty>("Rookie");
   const [timer, setTimer] = useState(45);
+  const [raceMode, setRaceMode] = useState(false);
+  const [onlineMode, setOnlineMode] = useState<"duel" | "race">("duel");
   const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState("");
   const [onlineError, setOnlineError] = useState("");
@@ -1031,7 +1441,7 @@ function PlaySheet({ me, onClose, onStartAI, onStartHotseat, onStartOnline, show
   const online = async (action: "quick_match" | "create_room" | "join_room") => {
     setBusy(action); setOnlineError("");
     try {
-      await onStartOnline(action, timer, joinCode.trim());
+      await onStartOnline(action, timer, joinCode.trim(), action === "join_room" ? "duel" : onlineMode);
     } catch (e) {
       setOnlineError(e instanceof Error ? e.message : "Connection failed — try again!");
     }
@@ -1048,16 +1458,17 @@ function PlaySheet({ me, onClose, onStartAI, onStartHotseat, onStartOnline, show
           )}
           <h3 className="font-display font-bold text-2xl flex-1">
             {step === "modes" && "Choose your battle"}
-            {step === "bots" && "Pick your rival bot"}
-            {step === "online" && "Online battle"}
+            {step === "bots" && (raceMode ? "🏁 Race a bot!" : "Pick your rival bot")}
+            {step === "online" && (onlineMode === "race" ? "🏁 Race online!" : "Online battle")}
             {step === "hotseat" && "2 players, 1 device"}
+            {step === "peer" && "📶 Local WiFi duel"}
           </h3>
           <button onClick={onClose} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center"><X size={17} strokeWidth={2.8} /></button>
         </div>
 
         {step === "modes" && (
           <div className="space-y-2.5">
-            <button onClick={() => setStep("bots")} className="w-full card-game p-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5">
+            <button onClick={() => { setRaceMode(false); setStep("bots"); }} className="w-full card-game p-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5">
               <span className="flex -space-x-3">
                 <CharacterAvatar config={AI_BOTS.Rookie.avatar} frameId={AI_BOTS.Rookie.frameId} size={46} ringWidth={3} />
                 <CharacterAvatar config={AI_BOTS.Oracle.avatar} frameId={AI_BOTS.Oracle.frameId} size={46} ringWidth={3} />
@@ -1069,6 +1480,15 @@ function PlaySheet({ me, onClose, onStartAI, onStartHotseat, onStartOnline, show
               <ChevronRight size={20} style={{ color: "var(--ink-faint)" }} />
             </button>
 
+            <button onClick={() => { setRaceMode(true); setStep("bots"); }} className="w-full card-game p-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5" style={{ borderColor: "#FF7A18" }}>
+              <span className="w-[52px] h-[52px] rounded-full flex items-center justify-center text-[26px] shrink-0" style={{ background: "linear-gradient(135deg,#FF7A18,#FF4B4B)" }} aria-hidden>🏁</span>
+              <span className="flex-1">
+                <span className="font-display font-semibold text-lg block leading-tight">Race Mode <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md text-white align-middle" style={{ background: "#FF4B4B" }}>NEW</span></span>
+                <span className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Same code, no turns — first to crack it wins! Pure speed.</span>
+              </span>
+              <ChevronRight size={20} style={{ color: "var(--ink-faint)" }} />
+            </button>
+
             <button onClick={() => setStep("online")} className="w-full card-game p-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5">
               <span className="w-[52px] h-[52px] rounded-full flex items-center justify-center text-white shrink-0" style={{ background: "linear-gradient(135deg,#1CB0F6,#7B5CFF)" }}>
                 <Globe size={26} strokeWidth={2.4} />
@@ -1076,6 +1496,17 @@ function PlaySheet({ me, onClose, onStartAI, onStartHotseat, onStartOnline, show
               <span className="flex-1">
                 <span className="font-display font-semibold text-lg block leading-tight">Online Battle</span>
                 <span className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Real players! Quick match, or a private room with a friend. Chat &amp; reactions included.</span>
+              </span>
+              <ChevronRight size={20} style={{ color: "var(--ink-faint)" }} />
+            </button>
+
+            <button onClick={() => setStep("peer")} className="w-full card-game p-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5" style={{ borderColor: "#58CC02" }}>
+              <span className="w-[52px] h-[52px] rounded-full flex items-center justify-center text-white shrink-0" style={{ background: "linear-gradient(135deg,#58CC02,#14D4C5)" }}>
+                <Wifi size={26} strokeWidth={2.4} />
+              </span>
+              <span className="flex-1">
+                <span className="font-display font-semibold text-lg block leading-tight">Local WiFi <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md text-white align-middle" style={{ background: "#58CC02" }}>NEW</span></span>
+                <span className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>No internet! Pair two phones by QR code on any WiFi/hotspot.</span>
               </span>
               <ChevronRight size={20} style={{ color: "var(--ink-faint)" }} />
             </button>
@@ -1117,16 +1548,36 @@ function PlaySheet({ me, onClose, onStartAI, onStartHotseat, onStartOnline, show
                 );
               })}
             </div>
-            <TimerChips options={[15, 30, 45, 60, 0]} value={timer} set={setTimer} />
-            <button onClick={() => onStartAI(bot, timer)} className="btn-game btn-green w-full py-4 text-xl flex items-center justify-center gap-2">
-              <Swords size={22} strokeWidth={2.7} /> Battle {AI_BOTS[bot].name}!
+            {raceMode ? (
+              <p className="text-sm font-bold text-center rounded-2xl px-3 py-2.5" style={{ background: "rgba(255,122,24,0.14)", color: "var(--ink-soft)" }}>
+                🏁 You and {AI_BOTS[bot].name} attack the SAME code at the same time — no turns, no waiting. First to crack it (max 15 guesses) wins!
+              </p>
+            ) : (
+              <TimerChips options={[15, 30, 45, 60, 0]} value={timer} set={setTimer} />
+            )}
+            <button onClick={() => (raceMode ? onStartRace(bot) : onStartAI(bot, timer))} className="btn-game btn-green w-full py-4 text-xl flex items-center justify-center gap-2">
+              <Swords size={22} strokeWidth={2.7} /> {raceMode ? `Race ${AI_BOTS[bot].name}!` : `Battle ${AI_BOTS[bot].name}!`}
             </button>
           </div>
         )}
 
         {step === "online" && (
           <div className="space-y-3">
-            <TimerChips options={[30, 45, 60, 90]} value={timer} set={setTimer} />
+            <div className="grid grid-cols-2 gap-1.5">
+              <button onClick={() => { setOnlineMode("duel"); soundEngine.playTap(520); }} className={`btn-game py-2.5 ${onlineMode === "duel" ? "btn-blue" : "btn-ghost"}`}>
+                ⚔️ Classic duel
+              </button>
+              <button onClick={() => { setOnlineMode("race"); soundEngine.playTap(520); }} className={`btn-game py-2.5 ${onlineMode === "race" ? "btn-red" : "btn-ghost"}`}>
+                🏁 Race mode
+              </button>
+            </div>
+            {onlineMode === "race" ? (
+              <p className="text-[12px] font-bold text-center rounded-2xl px-3 py-2" style={{ background: "rgba(255,75,75,0.12)", color: "var(--ink-soft)" }}>
+                Both players crack one shared code at the same time. First to solve wins +24 trophies!
+              </p>
+            ) : (
+              <TimerChips options={[30, 45, 60, 90]} value={timer} set={setTimer} />
+            )}
             <button onClick={() => online("quick_match")} disabled={!!busy} className="btn-game btn-green w-full py-4 text-lg flex items-center justify-center gap-2">
               {busy === "quick_match" ? <Loader2 className="animate-spin" size={21} /> : <Zap size={21} strokeWidth={2.7} />} Quick Match — find a rival now!
             </button>
@@ -1145,6 +1596,30 @@ function PlaySheet({ me, onClose, onStartAI, onStartHotseat, onStartOnline, show
             {onlineError && <p className="text-sm font-black rounded-xl px-3 py-2 animate-pop" style={{ background: "rgba(255,75,75,0.14)", color: "#D33131" }}>{onlineError}</p>}
             <p className="text-[11px] font-bold text-center" style={{ color: "var(--ink-faint)" }}>
               Quick Match pairs you instantly. Create a room to get a code you can share with a friend. If you get disconnected, come back and tap Rejoin — your match waits for you!
+            </p>
+          </div>
+        )}
+
+        {step === "peer" && (
+          <div className="space-y-3">
+            <div className="flex justify-center items-center gap-2 py-2">
+              <span className="w-14 h-14 rounded-full flex items-center justify-center text-white" style={{ background: "linear-gradient(135deg,#58CC02,#14D4C5)" }}>
+                <QrCode size={28} strokeWidth={2.4} />
+              </span>
+              <span className="font-display font-bold text-2xl" style={{ color: "var(--ink-faint)" }}>⇄</span>
+              <span className="w-14 h-14 rounded-full flex items-center justify-center text-white" style={{ background: "linear-gradient(135deg,#A560E8,#1CB0F6)" }}>
+                <Wifi size={28} strokeWidth={2.4} />
+              </span>
+            </div>
+            <p className="text-sm font-bold text-center" style={{ color: "var(--ink-soft)" }}>
+              Two phones, one WiFi (or hotspot), <b>zero internet</b>. One phone hosts and shows a QR code — the other scans it — and you duel directly, like Mini Militia!
+            </p>
+            <TimerChips options={[30, 45, 60, 0]} value={timer} set={setTimer} />
+            <button onClick={() => onStartPeer(timer)} className="btn-game btn-green w-full py-4 text-xl flex items-center justify-center gap-2">
+              <Wifi size={21} strokeWidth={2.6} /> Start local duel
+            </button>
+            <p className="text-[11px] font-bold text-center" style={{ color: "var(--ink-faint)" }}>
+              Tip: install the app on both phones first — after that it works fully offline.
             </p>
           </div>
         )}
@@ -1172,8 +1647,8 @@ function PlaySheet({ me, onClose, onStartAI, onStartHotseat, onStartOnline, show
 
 /* ------------------------------- Rank ------------------------------- */
 
-function RankScreen({ leaderboard, me, onBack, onRefresh }: {
-  leaderboard: LeaderboardRow[]; me: Player; onBack: () => void; onRefresh: () => void;
+function RankScreen({ leaderboard, me, onBack, onRefresh, onOpenPlayer }: {
+  leaderboard: LeaderboardRow[]; me: Player; onBack: () => void; onRefresh: () => void; onOpenPlayer: (id: number) => void;
 }) {
   const myIdx = leaderboard.findIndex((r) => r.id === me.id);
   return (
@@ -1213,7 +1688,8 @@ function RankScreen({ leaderboard, me, onBack, onRefresh }: {
       <div className="space-y-1.5">
         {leaderboard.length === 0 && <p className="text-center font-bold py-10" style={{ color: "var(--ink-faint)" }}>No ranked players yet — be the first Legend!</p>}
         {leaderboard.map((r, i) => (
-          <div key={r.id} className="card-game px-3 py-2 flex items-center gap-2.5 animate-rise" style={r.id === me.id ? { borderColor: "#58CC02" } : undefined}>
+          <div key={r.id} role="button" tabIndex={0} onClick={() => { if (r.id !== me.id) onOpenPlayer(r.id); }}
+            className="card-game px-3 py-2 flex items-center gap-2.5 animate-rise cursor-pointer active:scale-[0.99] transition-transform" style={r.id === me.id ? { borderColor: "#58CC02" } : undefined}>
             <span className={`font-display font-bold w-8 text-center text-lg`} style={{ color: i === 0 ? "#E0A800" : i === 1 ? "#8A97AD" : i === 2 ? "#B0703C" : "var(--ink-soft)" }}>
               {i < 3 ? <Medal size={22} className="mx-auto" /> : i + 1}
             </span>

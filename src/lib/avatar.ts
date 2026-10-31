@@ -7,12 +7,14 @@ export interface AvatarConfig {
   base: string; // base id e.g. "owl"
   color: string; // color id e.g. "classic"
   accessory: string; // accessory id e.g. "none"
+  pattern?: string; // pattern id e.g. "none" | "stripes" (optional for old saves)
 }
 
 export const DEFAULT_AVATAR: AvatarConfig = {
   base: "owl",
   color: "classic",
   accessory: "none",
+  pattern: "none",
 };
 
 export function normalizeAvatar(raw: unknown): AvatarConfig {
@@ -22,6 +24,7 @@ export function normalizeAvatar(raw: unknown): AvatarConfig {
     base: AVATAR_BASES.some((b) => b.id === r.base) ? (r.base as string) : "owl",
     color: AVATAR_COLORS.some((c) => c.id === r.color) ? (r.color as string) : "classic",
     accessory: ACCESSORIES.some((a) => a.id === r.accessory) ? (r.accessory as string) : "none",
+    pattern: PATTERNS.some((pt) => pt.id === r.pattern) ? (r.pattern as string) : "none",
   };
 }
 
@@ -40,6 +43,14 @@ export const AVATAR_BASES: AvatarBaseDef[] = [
   { id: "panda", name: "Bamboo the Panda", description: "Chill outside, genius inside." },
   { id: "robot", name: "Bolt the Bot", description: "Calculates 3,024 codes per second." },
   { id: "dragon", name: "Drake the Dragon", description: "Legendary code-burning beast." },
+  { id: "penguin", name: "Waddles the Penguin", description: "Ice-cold focus, warm heart." },
+  { id: "bunny", name: "Clover the Bunny", description: "Hops straight to the answer." },
+  { id: "bear", name: "Honey the Bear", description: "Big hugs, bigger brain." },
+  { id: "monkey", name: "Bananas the Monkey", description: "Wild guesses, weirdly right." },
+  { id: "tiger", name: "Raja the Tiger", description: "Stripes of a champion hunter." },
+  { id: "koala", name: "Eucalyptus the Koala", description: "Sleepy outside, solver inside." },
+  { id: "wolf", name: "Luna the Wolf", description: "Hunts codes by moonlight." },
+  { id: "ghost", name: "Boo the Ghost", description: "You never see the win coming." },
 ];
 
 export interface AvatarColorDef {
@@ -64,6 +75,12 @@ export const AVATAR_COLORS: AvatarColorDef[] = [
   { id: "midnight", name: "Midnight", body: "#4A4E8F", belly: "#C9CDF5", accent: "#2F3266", cheek: "#FF9EC4" },
   { id: "golden", name: "Golden Legend", body: "#F6C90E", belly: "#FFF7C9", accent: "#D9A400", cheek: "#FF9F68" },
   { id: "cosmic", name: "Cosmic Violet", body: "#7B5CFF", belly: "#E3DCFF", accent: "#5B3DF0", cheek: "#FFB3E2" },
+  { id: "mint", name: "Minty Fresh", body: "#3ED598", belly: "#DCFCEF", accent: "#1FA97A", cheek: "#FFB3B3" },
+  { id: "peach", name: "Peach Sorbet", body: "#FFB38A", belly: "#FFEFDE", accent: "#F08A4B", cheek: "#FF8FA3" },
+  { id: "cream", name: "Vanilla Cream", body: "#F2D8A7", belly: "#FFF8E8", accent: "#C99B5F", cheek: "#FFAB9E" },
+  { id: "slate", name: "Storm Slate", body: "#8494AC", belly: "#E4EAF3", accent: "#5C6E89", cheek: "#FFB3C8" },
+  { id: "berry", name: "Berry Blast", body: "#D6408C", belly: "#FFDFEF", accent: "#A81F66", cheek: "#FFC4D6" },
+  { id: "neon", name: "Neon Lime", body: "#B6F09C", belly: "#F2FFE4", accent: "#7BC950", cheek: "#FF9F68" },
 ];
 
 export function getAvatarColor(id: string): AvatarColorDef {
@@ -87,6 +104,25 @@ export const ACCESSORIES: AccessoryDef[] = [
   { id: "bow", name: "Lucky Bow", description: "Cute AND deadly accurate." },
   { id: "wizard", name: "Wizard Hat", description: "Sees codes through magic." },
   { id: "halo", name: "Angel Halo", description: "Pure luck. Probably." },
+  { id: "flower", name: "Daisy Flower", description: "Fresh-picked good vibes." },
+  { id: "beanie", name: "Cozy Beanie", description: "Warm head, cool logic." },
+  { id: "bandana", name: "Ninja Bandana", description: "Silent. Swift. Correct." },
+  { id: "monocle", name: "Fancy Monocle", description: "For distinguished detectives." },
+];
+
+export interface PatternDef {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export const PATTERNS: PatternDef[] = [
+  { id: "none", name: "No Pattern", description: "Clean solid color." },
+  { id: "spots", name: "Polka Spots", description: "Playful dotted fur." },
+  { id: "stripes", name: "Racer Stripes", description: "Built for speed." },
+  { id: "grid", name: "Arcade Grid", description: "Retro checker vibes." },
+  { id: "stars", name: "Star Sparkle", description: "Tiny stars, big dreams." },
+  { id: "hearts", name: "Sweet Hearts", description: "Win with love." },
 ];
 
 /* ------------------------- Frames (avatar rings) ------------------------ */
@@ -141,12 +177,18 @@ export const BOARD_THEMES: BoardThemeDef[] = [
 
 /* --------------------------- Win effects --------------------------- */
 
-export const WIN_EFFECTS: { id: string; name: string; description: string }[] = [
-  { id: "effect_confetti", name: "Party Confetti", description: "Classic confetti cannon blast." },
-  { id: "effect_lightning", name: "Thunder Strike", description: "Gold & cyan electric fireworks." },
-  { id: "effect_stars", name: "Supernova Starfall", description: "Golden stars rain down." },
-  { id: "effect_fireworks", name: "Victory Fireworks", description: "Full-sky celebration show." },
-  { id: "effect_matrix", name: "Matrix Rain", description: "Green code-rain cascade." },
-  { id: "effect_sparkle", name: "Gold Sparkle", description: "Sparkling gold burst." },
-  { id: "effect_shockwave", name: "Shockwave Ring", description: "A power ring blast." },
+export const WIN_EFFECTS: { id: string; name: string; description: string; swatch: string }[] = [
+  { id: "effect_confetti", name: "Party Confetti", description: "The classic rainbow cannon blast.", swatch: "linear-gradient(135deg,#FF4B6E,#FFC800,#58CC02,#1CB0F6)" },
+  { id: "effect_sparkle", name: "Gold Sparkle", description: "Twinkling gold dust floats everywhere.", swatch: "linear-gradient(135deg,#FFF3C4,#FFD93D)" },
+  { id: "effect_lightning", name: "Thunder Strike", description: "Lightning bolts crash from the sky!", swatch: "linear-gradient(135deg,#0F2B4C,#FFD93D)" },
+  { id: "effect_matrix", name: "Matrix Rain", description: "Green code digits pour down.", swatch: "linear-gradient(135deg,#0B3D1E,#00E676)" },
+  { id: "effect_stars", name: "Supernova Starfall", description: "Giant golden stars drift down.", swatch: "linear-gradient(135deg,#3B1D6E,#FFD93D)" },
+  { id: "effect_shockwave", name: "Shockwave Ring", description: "A power ring blasts outward!", swatch: "linear-gradient(135deg,#FF4B4B,#FF7A18)" },
+  { id: "effect_fireworks", name: "Victory Fireworks", description: "A full-sky fireworks show.", swatch: "linear-gradient(135deg,#12002E,#FF4B6E,#1CB0F6)" },
+  { id: "effect_coins", name: "Coin Shower", description: "Gold coins rain from above!", swatch: "linear-gradient(135deg,#F6C90E,#E0A800)" },
+  { id: "effect_bubbles", name: "Bubble Rise", description: "Dreamy bubbles float up to the sky.", swatch: "linear-gradient(135deg,#BFE9FF,#FFB3E2)" },
+  { id: "effect_laser", name: "Neon Lasers", description: "Twin neon laser cannons. Pew pew!", swatch: "linear-gradient(135deg,#FF2E93,#00E5FF)" },
+  { id: "effect_snow", name: "Snowfall", description: "Peaceful, sparkling victory snow.", swatch: "linear-gradient(135deg,#E8F6FF,#9AD4FF)" },
+  { id: "effect_emoji", name: "Emoji Party", description: "Trophies, stars and fire explode!", swatch: "linear-gradient(135deg,#FF86D0,#FFC800,#58CC02)" },
+  { id: "effect_crown", name: "Champion's Crowns", description: "Crowns rain for the true legend.", swatch: "linear-gradient(135deg,#7B5CFF,#FFD93D)" },
 ];

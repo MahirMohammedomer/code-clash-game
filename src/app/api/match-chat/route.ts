@@ -30,12 +30,15 @@ export async function GET(req: NextRequest) {
     const sinceReact = Number(searchParams.get("sinceReact") || 0);
     if (!roomCode) return NextResponse.json({ messages: [], reactions: [] });
 
-    const messages = await db
-      .select()
-      .from(matchChatMessages)
-      .where(and(eq(matchChatMessages.roomCode, roomCode), gt(matchChatMessages.id, sinceChat)))
-      .orderBy(asc(matchChatMessages.id))
-      .limit(100);
+    const viewer = await authSlot(roomCode, searchParams.get("token") || "");
+    const messages = viewer
+      ? await db
+          .select()
+          .from(matchChatMessages)
+          .where(and(eq(matchChatMessages.roomCode, roomCode), gt(matchChatMessages.id, sinceChat)))
+          .orderBy(asc(matchChatMessages.id))
+          .limit(100)
+      : [];
 
     const reactions = await db
       .select()
@@ -72,6 +75,27 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const roomCode = String(body.roomCode || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     const auth = await authSlot(roomCode, String(body.token || ""));
+
+    // Spectators may send crowd reactions (slot 3) — never chat messages.
+    if (!auth && body.action === "reaction" && body.spectator === true) {
+      const reaction = String(body.reaction || "");
+      if (!(REACTION_IDS as readonly string[]).includes(reaction)) {
+        return NextResponse.json({ error: "Unknown reaction" }, { status: 400 });
+      }
+      const fanName = sanitizeText(body.name || "Fan", 16) || "Fan";
+      const srl = rateLimit(`spec:${roomCode}:${fanName.toLowerCase()}`, 10, 30000);
+      if (!srl.ok) return NextResponse.json({ error: "Slow down a little!" }, { status: 429 });
+      const [m] = await db.select().from(matches).where(eq(matches.roomCode, roomCode)).limit(1);
+      if (!m) return NextResponse.json({ error: "Match not found" }, { status: 404 });
+      const [row] = await db
+        .insert(matchReactions)
+        .values({ matchId: m.id, roomCode, senderSlot: 3, senderName: fanName, emoji: reaction })
+        .returning();
+      return NextResponse.json({
+        reaction: { id: row.id, senderSlot: row.senderSlot, senderName: row.senderName, reaction: row.emoji, createdAt: new Date(row.createdAt).toISOString() },
+      });
+    }
+
     if (!auth) return NextResponse.json({ error: "Not in this match" }, { status: 403 });
 
     const rl = rateLimit(`mc:${roomCode}:${auth.slot}`, 20, 30000);

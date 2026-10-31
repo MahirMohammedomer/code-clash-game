@@ -2,17 +2,19 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ThumbsUp, Flame, Laugh, Ghost, Rocket, Target, Heart, Star, Send, X, MessageCircle } from "lucide-react";
-import { QUICK_PHRASES } from "@/lib/game-engine";
+import { QUICK_PHRASES, REACTION_EMOJI } from "@/lib/game-engine";
 import type { MatchChatMessage, MatchReaction } from "@/lib/types";
 import { soundEngine } from "@/lib/sound-effects";
 
-export const REACTION_META: Record<string, { icon: React.ElementType; color: string; label: string }> = {
+export const REACTION_META: Record<string, { icon?: React.ElementType; emoji?: string; color: string; label: string }> = {
+  joy: { emoji: REACTION_EMOJI.joy, color: "#E0A800", label: "Joy" },
+  mindblown: { emoji: REACTION_EMOJI.mindblown, color: "#A560E8", label: "Mind blown" },
   thumbs_up: { icon: ThumbsUp, color: "#1CB0F6", label: "Nice" },
   fire: { icon: Flame, color: "#FF7A18", label: "Fire" },
-  laugh: { icon: Laugh, color: "#E0A800", label: "Haha" },
-  wow: { icon: Ghost, color: "#A560E8", label: "Wow" },
+  clap: { emoji: REACTION_EMOJI.clap, color: "#58CC02", label: "Clap" },
+  party: { emoji: REACTION_EMOJI.party, color: "#FF4B6E", label: "Party" },
+  eyes: { emoji: REACTION_EMOJI.eyes, color: "#14D4C5", label: "Watching" },
   rocket: { icon: Rocket, color: "#FF4B4B", label: "Boost" },
-  target: { icon: Target, color: "#58CC02", label: "Bullseye" },
   heart: { icon: Heart, color: "#FF4B6E", label: "Love" },
   star: { icon: Star, color: "#FFC800", label: "Star" },
 };
@@ -44,7 +46,7 @@ export function useMatchSocial(roomCode: string | null, token: string | null, my
     const load = async () => {
       try {
         const res = await fetch(
-          `/api/match-chat?roomCode=${roomCode}&sinceChat=${chatCursor.current}&sinceReact=${reactCursor.current}`
+          `/api/match-chat?roomCode=${roomCode}&token=${token}&sinceChat=${chatCursor.current}&sinceReact=${reactCursor.current}`
         );
         if (!res.ok || !alive) return;
         const data = await res.json();
@@ -242,7 +244,11 @@ export function ReactionsBar({ onReact, compact = false }: { onReact: (id: strin
             className={`rounded-full flex items-center justify-center border-2 active:scale-90 transition-transform ${compact ? "w-8 h-8" : "w-9 h-9"}`}
             style={{ background: "var(--board-key, var(--surface))", borderColor: "var(--board-border, var(--border))", color: meta.color }}
           >
-            <Icon size={compact ? 15 : 17} strokeWidth={2.6} fill={id === "heart" || id === "star" ? meta.color : "none"} />
+            {meta.emoji ? (
+              <span className={compact ? "text-[15px] leading-none" : "text-[17px] leading-none"}>{meta.emoji}</span>
+            ) : Icon ? (
+              <Icon size={compact ? 15 : 17} strokeWidth={2.6} fill={id === "heart" || id === "star" ? meta.color : "none"} />
+            ) : null}
           </button>
         );
       })}
@@ -264,7 +270,11 @@ export function ReactionFloaters({ floaters, side }: { floaters: Floater[]; side
             className="animate-reaction w-10 h-10 rounded-full flex items-center justify-center bg-white shadow-lg border-2"
             style={{ color: meta.color, borderColor: meta.color }}
           >
-            <Icon size={20} strokeWidth={2.6} fill={f.reaction === "heart" || f.reaction === "star" ? meta.color : "none"} />
+            {meta.emoji ? (
+              <span className="text-[21px] leading-none">{meta.emoji}</span>
+            ) : Icon ? (
+              <Icon size={20} strokeWidth={2.6} fill={f.reaction === "heart" || f.reaction === "star" ? meta.color : "none"} />
+            ) : null}
           </span>
         );
       })}

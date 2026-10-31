@@ -29,6 +29,9 @@ export interface Player {
   dailyStats?: DailyStats;
   claimedDailyQuests?: string[]; // entries like "quest_play_2:2026-10-31"
   dailyChallengeDone?: string | null; // dateKey
+  dailyCodeDone?: string | null; // dateKey of last solved Daily Code
+  seasonId?: string;
+  seasonPeakTrophies?: number;
   tutorialSeen?: boolean;
   isAdmin?: boolean;
   isGuest?: boolean;
@@ -76,6 +79,10 @@ export interface MatchView {
   winnerSlot: number | null;
   winnerName: string | null;
   endReason?: string | null;
+  /** Revealed only once the match is finished (for replays / result screen). */
+  secret1?: string;
+  secret2?: string;
+  raceCode?: string;
   p1SeenAt?: string | null;
   p2SeenAt?: string | null;
   serverNow: string;
@@ -150,4 +157,115 @@ export interface MatchResultPayload {
   xpEarned: number;
   dailyChallengeId?: string;
   resultId: string; // idempotency key
+}
+
+/* ------------------------------ v4 social ------------------------------ */
+
+export interface SocialPlayer {
+  id: number;
+  username: string;
+  avatarConfig: AvatarConfig;
+  frameId: string;
+  title: string;
+  division: string;
+  trophies: number;
+  level: number;
+  isOnline: boolean;
+  inMatchRoom: string | null; // room code if currently in a live match (spectate!)
+  following?: boolean; // I follow them
+}
+
+export interface InviteView {
+  id: number;
+  fromPlayerId: number;
+  toPlayerId: number;
+  fromName: string;
+  fromAvatar: AvatarConfig;
+  fromFrame: string;
+  timerSeconds: number;
+  kind: "challenge" | "rematch";
+  status: string;
+  roomCode: string | null;
+  myToken?: string; // present on accepted invites (slot token for the caller)
+  mySlot?: 1 | 2;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface PublicProfile {
+  id: number;
+  username: string;
+  avatarConfig: AvatarConfig;
+  frameId: string;
+  themeId: string;
+  title: string;
+  division: string;
+  trophies: number;
+  level: number;
+  wins: number;
+  losses: number;
+  totalGames: number;
+  fastestWinTurns: number | null;
+  streakDays: number;
+  isOnline: boolean;
+  inMatchRoom: string | null;
+  createdAt: string;
+  followers: number;
+  following: number;
+  isFollowing: boolean; // requester follows them
+  followsMe: boolean;
+  achievements: string[];
+  h2h: { wins: number; losses: number } | null; // requester's record vs this player
+}
+
+export interface HistoryEntry {
+  historyId: string;
+  mode: string;
+  result: "win" | "loss" | "draw";
+  myName: string;
+  myAvatar: AvatarConfig;
+  oppName: string;
+  oppAvatar: AvatarConfig;
+  oppPlayerId?: number | null;
+  mySecret: string;
+  oppSecret: string;
+  guesses: GuessEntry[];
+  endReason?: string | null;
+  turnsTaken: number;
+  createdAt: string;
+}
+
+export interface HuntGuesserView {
+  username: string;
+  avatar: AvatarConfig;
+  attempts: number;
+  bestOrders: number;
+  bestPoints: number;
+  solved: boolean;
+  isMe: boolean;
+}
+
+export interface TournamentView {
+  id: number;
+  name: string;
+  status: string; // live | finished
+  isPrivate: boolean;
+  inviteCode: string | null;
+  prizeCoins: number;
+  prizeGems: number;
+  createdBy: string;
+  endsAt: string;
+  createdAt: string;
+  secretCode?: string; // only when finished, or for the creator
+  winnerName?: string | null;
+  leaderboard: HuntGuesserView[];
+  mine: { guesses: { guess: string; points: number; orders: number }[]; solved: boolean } | null;
+  canPlay: boolean; // false for the hunt's own creator
+}
+
+export interface SeasonInfo {
+  id: string;
+  label: string;
+  daysLeft: number;
+  rolled?: { prevDivision: string; coins: number; gems: number; trophiesResetTo: number } | null;
 }
