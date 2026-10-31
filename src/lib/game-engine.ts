@@ -322,7 +322,7 @@ export function pickLine(lines: string[]): string {
 /* ------------------------------ Shop catalog ----------------------------- */
 
 export type CosmeticCategory =
-  | "avatar_base" | "avatar_color" | "avatar_accessory"
+  | "avatar_base" | "avatar_color" | "avatar_accessory" | "avatar_pattern"
   | "frame" | "theme" | "effect" | "title";
 
 export type Rarity = "common" | "rare" | "epic" | "legendary";
@@ -356,6 +356,14 @@ export const SHOP_ITEMS: CosmeticItem[] = [
   { id: "base_panda", name: "Bamboo the Panda", category: "avatar_base", description: "Chill outside, genius inside.", priceGems: 40, rarity: "epic", meta: "panda" },
   { id: "base_robot", name: "Bolt the Bot", category: "avatar_base", description: "3,024 codes per second.", priceGems: 60, rarity: "epic", meta: "robot" },
   { id: "base_dragon", name: "Drake the Dragon", category: "avatar_base", description: "Legendary code-burning beast.", priceGems: 120, rarity: "legendary", meta: "dragon" },
+  { id: "base_penguin", name: "Waddles the Penguin", category: "avatar_base", description: "Ice-cold focus, warm heart.", priceCoins: 250, rarity: "common", meta: "penguin" },
+  { id: "base_bunny", name: "Clover the Bunny", category: "avatar_base", description: "Hops straight to the answer.", priceCoins: 300, rarity: "common", meta: "bunny" },
+  { id: "base_bear", name: "Honey the Bear", category: "avatar_base", description: "Big hugs, bigger brain.", priceCoins: 400, rarity: "rare", meta: "bear" },
+  { id: "base_monkey", name: "Bananas the Monkey", category: "avatar_base", description: "Wild guesses, weirdly right.", priceCoins: 450, rarity: "rare", meta: "monkey" },
+  { id: "base_tiger", name: "Raja the Tiger", category: "avatar_base", description: "Stripes of a champion hunter.", priceCoins: 550, rarity: "rare", meta: "tiger" },
+  { id: "base_koala", name: "Eucalyptus the Koala", category: "avatar_base", description: "Sleepy outside, solver inside.", priceGems: 45, rarity: "epic", meta: "koala" },
+  { id: "base_wolf", name: "Luna the Wolf", category: "avatar_base", description: "Hunts codes by moonlight.", priceGems: 55, rarity: "epic", meta: "wolf" },
+  { id: "base_ghost", name: "Boo the Ghost", category: "avatar_base", description: "You never see the win coming.", priceGems: 70, rarity: "epic", meta: "ghost" },
   // Colors
   { id: "color_classic", name: "Meadow Green", category: "avatar_color", description: "The original clash green.", priceCoins: 0, rarity: "common", meta: "classic" },
   { id: "color_sky", name: "Sky Blue", category: "avatar_color", description: "Fresh and fearless.", priceCoins: 120, rarity: "common", meta: "sky" },
@@ -369,6 +377,12 @@ export const SHOP_ITEMS: CosmeticItem[] = [
   { id: "color_midnight", name: "Midnight", category: "avatar_color", description: "Strikes after dark.", priceGems: 35, rarity: "epic", meta: "midnight" },
   { id: "color_cosmic", name: "Cosmic Violet", category: "avatar_color", description: "From another galaxy.", priceGems: 55, rarity: "epic", meta: "cosmic" },
   { id: "color_golden", name: "Golden Legend", category: "avatar_color", description: "Pure championship shine.", priceGems: 90, rarity: "legendary", meta: "golden" },
+  { id: "color_mint", name: "Minty Fresh", category: "avatar_color", description: "Cool, calm, collected.", priceCoins: 150, rarity: "common", meta: "mint" },
+  { id: "color_peach", name: "Peach Sorbet", category: "avatar_color", description: "Soft serve sweetness.", priceCoins: 180, rarity: "common", meta: "peach" },
+  { id: "color_cream", name: "Vanilla Cream", category: "avatar_color", description: "Smooth operator.", priceCoins: 220, rarity: "rare", meta: "cream" },
+  { id: "color_slate", name: "Storm Slate", category: "avatar_color", description: "Serious storm energy.", priceCoins: 320, rarity: "rare", meta: "slate" },
+  { id: "color_berry", name: "Berry Blast", category: "avatar_color", description: "Explosively pink.", priceGems: 30, rarity: "epic", meta: "berry" },
+  { id: "color_neon", name: "Neon Lime", category: "avatar_color", description: "Glows under pressure.", priceGems: 45, rarity: "epic", meta: "neon" },
   // Accessories
   { id: "acc_none", name: "No Accessory", category: "avatar_accessory", description: "Clean and classic.", priceCoins: 0, rarity: "common", meta: "none" },
   { id: "acc_cap", name: "Sport Cap", category: "avatar_accessory", description: "Game day ready.", priceCoins: 180, rarity: "common", meta: "cap" },
@@ -380,6 +394,17 @@ export const SHOP_ITEMS: CosmeticItem[] = [
   { id: "acc_crown", name: "Royal Crown", category: "avatar_accessory", description: "Code-breaking royalty.", priceGems: 70, rarity: "legendary", meta: "crown" },
   { id: "acc_wizard", name: "Wizard Hat", category: "avatar_accessory", description: "Sees codes through magic.", priceGems: 60, rarity: "epic", meta: "wizard" },
   { id: "acc_halo", name: "Angel Halo", category: "avatar_accessory", description: "Pure luck. Probably.", priceGems: 50, rarity: "epic", meta: "halo" },
+  { id: "acc_flower", name: "Daisy Flower", category: "avatar_accessory", description: "Fresh-picked good vibes.", priceCoins: 200, rarity: "common", meta: "flower" },
+  { id: "acc_beanie", name: "Cozy Beanie", category: "avatar_accessory", description: "Warm head, cool logic.", priceCoins: 260, rarity: "rare", meta: "beanie" },
+  { id: "acc_bandana", name: "Ninja Bandana", category: "avatar_accessory", description: "Silent. Swift. Correct.", priceCoins: 380, rarity: "rare", meta: "bandana" },
+  { id: "acc_monocle", name: "Fancy Monocle", category: "avatar_accessory", description: "For distinguished detectives.", priceGems: 45, rarity: "epic", meta: "monocle" },
+  // Patterns
+  { id: "pat_none", name: "No Pattern", category: "avatar_pattern", description: "Clean solid color.", priceCoins: 0, rarity: "common", meta: "none" },
+  { id: "pat_spots", name: "Polka Spots", category: "avatar_pattern", description: "Playful dotted fur.", priceCoins: 220, rarity: "common", meta: "spots" },
+  { id: "pat_stripes", name: "Racer Stripes", category: "avatar_pattern", description: "Built for speed.", priceCoins: 260, rarity: "rare", meta: "stripes" },
+  { id: "pat_grid", name: "Arcade Grid", category: "avatar_pattern", description: "Retro checker vibes.", priceCoins: 300, rarity: "rare", meta: "grid" },
+  { id: "pat_stars", name: "Star Sparkle", category: "avatar_pattern", description: "Tiny stars, big dreams.", priceGems: 30, rarity: "epic", meta: "stars" },
+  { id: "pat_hearts", name: "Sweet Hearts", category: "avatar_pattern", description: "Win with love.", priceGems: 35, rarity: "epic", meta: "hearts" },
   // Frames
   { id: "frame_emerald", name: "Emerald Sprout Frame", category: "frame", description: "Classic victory green ring.", priceCoins: 0, rarity: "common", meta: "frame_emerald" },
   { id: "frame_gold", name: "Solar Gold Frame", category: "frame", description: "Gleaming champion gold.", priceCoins: 350, rarity: "rare", meta: "frame_gold" },
@@ -404,12 +429,18 @@ export const SHOP_ITEMS: CosmeticItem[] = [
   { id: "theme_galaxy", name: "Galaxy Vault", category: "theme", description: "Codes among the stars.", priceGems: 85, rarity: "legendary", meta: "theme_galaxy" },
   // Win effects
   { id: "effect_confetti", name: "Party Confetti", category: "effect", description: "Confetti cannon blast.", priceCoins: 0, rarity: "common", meta: "effect_confetti" },
-  { id: "effect_sparkle", name: "Gold Sparkle Burst", category: "effect", description: "Golden sparkles explode.", priceCoins: 400, rarity: "rare", meta: "effect_sparkle" },
-  { id: "effect_lightning", name: "Thunder Strike", category: "effect", description: "Electric gold & cyan.", priceCoins: 450, rarity: "rare", meta: "effect_lightning" },
-  { id: "effect_matrix", name: "Matrix Rain", category: "effect", description: "Green code-rain cascade.", priceCoins: 520, rarity: "rare", meta: "effect_matrix" },
-  { id: "effect_stars", name: "Supernova Starfall", category: "effect", description: "Golden stars rain down.", priceGems: 55, rarity: "epic", meta: "effect_stars" },
-  { id: "effect_shockwave", name: "Shockwave Ring", category: "effect", description: "Power ring blast.", priceGems: 65, rarity: "epic", meta: "effect_shockwave" },
-  { id: "effect_fireworks", name: "Victory Fireworks", category: "effect", description: "Full-sky celebration.", priceGems: 70, rarity: "legendary", meta: "effect_fireworks" },
+  { id: "effect_sparkle", name: "Gold Sparkle", category: "effect", description: "Twinkling gold dust floats.", priceCoins: 400, rarity: "rare", meta: "effect_sparkle" },
+  { id: "effect_lightning", name: "Thunder Strike", category: "effect", description: "Lightning bolts crash down!", priceCoins: 450, rarity: "rare", meta: "effect_lightning" },
+  { id: "effect_matrix", name: "Matrix Rain", category: "effect", description: "Green code digits pour down.", priceCoins: 520, rarity: "rare", meta: "effect_matrix" },
+  { id: "effect_stars", name: "Supernova Starfall", category: "effect", description: "Giant golden stars drift down.", priceGems: 55, rarity: "epic", meta: "effect_stars" },
+  { id: "effect_shockwave", name: "Shockwave Ring", category: "effect", description: "A power ring blasts outward!", priceGems: 65, rarity: "epic", meta: "effect_shockwave" },
+  { id: "effect_fireworks", name: "Victory Fireworks", category: "effect", description: "Full-sky fireworks show.", priceGems: 70, rarity: "legendary", meta: "effect_fireworks" },
+  { id: "effect_bubbles", name: "Bubble Rise", category: "effect", description: "Dreamy bubbles float up.", priceCoins: 420, rarity: "rare", meta: "effect_bubbles" },
+  { id: "effect_coins", name: "Coin Shower", category: "effect", description: "Gold coins rain from above!", priceCoins: 480, rarity: "rare", meta: "effect_coins" },
+  { id: "effect_snow", name: "Snowfall", category: "effect", description: "Peaceful sparkling snow.", priceGems: 55, rarity: "epic", meta: "effect_snow" },
+  { id: "effect_laser", name: "Neon Lasers", category: "effect", description: "Twin neon laser cannons!", priceGems: 60, rarity: "epic", meta: "effect_laser" },
+  { id: "effect_emoji", name: "Emoji Party", category: "effect", description: "Trophies, stars & fire explode!", priceGems: 65, rarity: "epic", meta: "effect_emoji" },
+  { id: "effect_crown", name: "Champion's Crowns", category: "effect", description: "Crowns rain for legends.", priceGems: 100, rarity: "legendary", meta: "effect_crown" },
   // Titles
   { id: "title_breaker", name: "Code Breaker", category: "title", description: "The classic badge.", priceCoins: 0, rarity: "common", meta: "Code Breaker" },
   { id: "title_sleuth", name: "Digit Sleuth", category: "title", description: "Finds every clue.", priceCoins: 200, rarity: "common", meta: "Digit Sleuth" },
@@ -427,7 +458,7 @@ export function getShopItem(id: string): CosmeticItem | undefined {
 }
 
 export const STARTER_OWNED = [
-  "base_owl", "color_classic", "acc_none",
+  "base_owl", "color_classic", "acc_none", "pat_none",
   "frame_emerald", "theme_classic", "effect_confetti", "title_breaker",
 ];
 
@@ -436,7 +467,8 @@ export const STARTER_OWNED = [
 export function computeTrophyDelta(won: boolean, mode: string, aiDifficulty?: string): number {
   let base = 20;
   if (mode === "online_1v1") base = 28;
-  else if (mode === "hotseat" || mode === "local_offline") base = 0; // friendly, no trophies
+  else if (mode === "online_race") base = 24;
+  else if (mode === "hotseat" || mode === "local_offline" || mode === "peer" || mode === "tournament" || mode === "daily_code") base = 0; // friendly / solo, no trophies
   else if (mode === "ai") {
     if (aiDifficulty === "Oracle") base = 42;
     else if (aiDifficulty === "Mastermind") base = 30;
@@ -537,19 +569,189 @@ export const ACHIEVEMENTS: AchievementItem[] = [
 
 /* ------------------------------ Reactions ------------------------------- */
 
-/** Icon-based quick reactions (rendered with Lucide icons, never emoji). */
+/** Quick reactions: classic icon set + a playful emoji set (rendered big & bouncy). */
 export const REACTION_IDS = [
   "thumbs_up", "fire", "laugh", "wow", "rocket", "target", "heart", "star",
+  "joy", "clap", "mindblown", "party", "muscle", "eyes",
 ] as const;
+
+/** Emoji glyphs for the playful reaction ids. */
+export const REACTION_EMOJI: Record<string, string> = {
+  joy: "😂",
+  clap: "👏",
+  mindblown: "🤯",
+  party: "🎉",
+  muscle: "💪",
+  eyes: "👀",
+};
 export type ReactionId = (typeof REACTION_IDS)[number];
 
 export const QUICK_PHRASES = [
-  "Good luck!",
-  "Nice try!",
-  "So close!",
-  "Oops!",
-  "Bring it on!",
-  "Great game!",
-  "Rematch?",
-  "I'm coming for that code!",
+  "Good luck! 🍀",
+  "Nice try! 😏",
+  "So close! 😱",
+  "Oops! 🙈",
+  "Bring it on! 🔥",
+  "Great game! 🎉",
+  "Rematch? ↩️",
+  "I'm coming for that code! 🕵️",
+  "Too slow! 🐢",
+  "Brain = ON 🧠",
 ];
+
+/* ------------------------- Solver helpers / coach ------------------------ */
+
+/** All codes still consistent with a feedback history (points+orders). */
+export function filterCandidates(history: PastGuessFeedback[]): string[] {
+  const valid = history.filter((h) => isValidSecretCode(h.guess));
+  if (valid.length === 0) return getAllValidCodes();
+  return getAllValidCodes().filter((candidate) => {
+    for (const h of valid) {
+      const ev = evaluateGuess(candidate, h.guess);
+      if (ev.points !== h.points || ev.orders !== h.orders) return false;
+    }
+    return true;
+  });
+}
+
+export interface CoachNote {
+  guessIndex: number; // 0-based index into the player's own guesses
+  kind: "great" | "wasted" | "missedWin" | "info";
+  text: string;
+}
+
+export interface CoachReport {
+  notes: CoachNote[];
+  grade: string;
+  wasted: number;
+  missedWins: number;
+}
+
+/**
+ * Professor Hoot's post-game analysis of one player's guessing.
+ * Flags guesses that ignored earlier clues and turns where the code was forced.
+ */
+export function analyzeGuesses(rawGuesses: PastGuessFeedback[]): CoachReport {
+  const guesses = rawGuesses.filter((g) => isValidSecretCode(g.guess));
+  const notes: CoachNote[] = [];
+  let wasted = 0;
+  let missedWins = 0;
+
+  for (let i = 0; i < guesses.length; i++) {
+    const before = filterCandidates(guesses.slice(0, i));
+    const g = guesses[i];
+    if (before.length === 1 && g.guess !== before[0]) {
+      missedWins++;
+      notes.push({
+        guessIndex: i,
+        kind: "missedWin",
+        text: `Turn ${i + 1}: the code was already forced to be ${before[0]} — every clue pointed there! 🎯`,
+      });
+    } else if (i > 0 && !before.includes(g.guess)) {
+      wasted++;
+      notes.push({
+        guessIndex: i,
+        kind: "wasted",
+        text: `Turn ${i + 1}: ${g.guess} was already ruled out by your earlier clues. Check your pegs before guessing! 🧐`,
+      });
+    } else if (g.points === 0 && i < 3) {
+      notes.push({
+        guessIndex: i,
+        kind: "great",
+        text: `Turn ${i + 1}: zero hits is great news early — four digits eliminated in one move! 💡`,
+      });
+    } else if (g.orders >= 3) {
+      notes.push({
+        guessIndex: i,
+        kind: "great",
+        text: `Turn ${i + 1}: three digits locked in place — surgical precision! 🔥`,
+      });
+    }
+  }
+
+  let grade: string;
+  if (guesses.length === 0) grade = "No guesses to grade yet!";
+  else if (missedWins === 0 && wasted === 0 && guesses.length <= 5) grade = "Grandmaster brain 🧠✨ — flawless logic!";
+  else if (missedWins === 0 && wasted <= 1) grade = "Sharp detective work 🕵️ — very efficient!";
+  else if (wasted <= 2) grade = "Good instincts! A little peg-checking would make you deadly. 📈";
+  else grade = "Brave guessing! Slow down and let the clues talk. 🦉";
+
+  return { notes, grade, wasted, missedWins };
+}
+
+/* ------------------------------ Daily Code ------------------------------- */
+
+function hashSeed(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Same secret for every player on a given date (YYYY-MM-DD). */
+export function getDailyCodeSecret(dateKey: string): string {
+  const rand = mulberry32(hashSeed("cipherclash-daily-" + dateKey));
+  const digits = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+  for (let i = digits.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [digits[i], digits[j]] = [digits[j], digits[i]];
+  }
+  return digits.slice(0, 4).join("");
+}
+
+export const DAILY_CODE_MAX = 8;
+
+/** Wordle-style share text with an emoji peg grid. */
+export function dailyCodeShareText(dateKey: string, feedback: { points: number; orders: number }[], won: boolean): string {
+  const grid = feedback
+    .map((f) => {
+      const cells = ["⬜", "⬜", "⬜", "⬜"];
+      for (let i = 0; i < f.orders; i++) cells[i] = "🟢";
+      for (let i = f.orders; i < f.points; i++) cells[i] = "🔵";
+      return cells.join("");
+    })
+    .join("\n");
+  const score = won ? `${feedback.length}/${DAILY_CODE_MAX}` : `X/${DAILY_CODE_MAX}`;
+  return `🧩 Cipher Clash — Daily Code ${dateKey}\nCracked in ${score} guesses!\n${grid}\nCan you beat me? Play free: npo.pro.et`;
+}
+
+/* ------------------------------ Seasons ---------------------------------- */
+
+export function currentSeasonId(d = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function seasonLabel(seasonId: string): string {
+  const [y, m] = seasonId.split("-").map(Number);
+  const name = new Date(y, (m || 1) - 1, 1).toLocaleString("en-US", { month: "long" });
+  return `${name} ${y}`;
+}
+
+export function seasonDaysLeft(d = new Date()): number {
+  const end = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  return Math.max(0, Math.ceil((end.getTime() - d.getTime()) / 86400000));
+}
+
+/** End-of-season payout based on the division you reached at your peak. */
+export const SEASON_REWARDS: Record<DivisionName, { coins: number; gems: number }> = {
+  Bronze: { coins: 100, gems: 0 },
+  Silver: { coins: 200, gems: 15 },
+  Gold: { coins: 350, gems: 30 },
+  Platinum: { coins: 550, gems: 50 },
+  Diamond: { coins: 800, gems: 80 },
+  Master: { coins: 1100, gems: 120 },
+  Grandmaster: { coins: 1500, gems: 170 },
+  Legend: { coins: 2200, gems: 250 },
+};

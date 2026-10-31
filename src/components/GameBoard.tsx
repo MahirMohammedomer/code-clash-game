@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import confetti from "canvas-confetti";
 import {
   ArrowLeft, Delete, Dices, Lock, Pencil, Play, Home, Trophy, Coins, Zap,
   MessageCircle, Copy, Check, WifiOff, Flag, Clock, Lightbulb, Eye, EyeOff,
@@ -15,11 +14,13 @@ import { DEFAULT_AVATAR, type AvatarConfig } from "@/lib/avatar";
 import { Character, CharacterAvatar, SpeechBubble } from "./Character";
 import { MatchChatPanel, ReactionsBar, ReactionFloaters, useMatchSocial, type Floater } from "./MatchChat";
 import { soundEngine } from "@/lib/sound-effects";
+import { fireWinEffect } from "@/lib/win-effects";
+import { newHistoryId } from "@/lib/history";
 import { makeId, saveRoomSession, loadRoomSession } from "@/lib/session";
-import type { GuessEntry, MatchView, Player } from "@/lib/types";
+import type { GuessEntry, MatchView, Player, HistoryEntry, RoomSession, InviteView } from "@/lib/types";
 
 export interface GameConfig {
-  mode: "ai" | "online" | "hotseat";
+  mode: "ai" | "online" | "hotseat" | "race" | "peer";
   aiDifficulty?: AIDifficulty;
   roomCode?: string;
   slot?: 1 | 2;
@@ -28,6 +29,7 @@ export interface GameConfig {
   dailyRule?: DailyChallengeRule;
   dailyChallengeId?: string;
   isRematchSearch?: boolean;
+  race?: boolean; // online race hint (match.mode is authoritative once loaded)
 }
 
 export interface GameOutcome {
@@ -44,6 +46,7 @@ export interface GameOutcome {
   winnerName: string;
   myName: string;
   oppName: string;
+  history?: HistoryEntry; // full record for replays (saved by the app shell)
 }
 
 interface BoardProps {
@@ -53,11 +56,13 @@ interface BoardProps {
   onResult: (outcome: GameOutcome) => void;
   onPlayAgainOnline?: () => void;
   showToast: (msg: string, kind?: "ok" | "err") => void;
+  authToken?: string | null; // account token (rematches, friends)
+  onEnterRoom?: (room: RoomSession & { timerSeconds?: number }) => void;
 }
 
 /* ============================ shared UI bits ============================ */
 
-function Pegs({ points, orders, hideOrders }: { points: number; orders: number; hideOrders?: boolean }) {
+export function Pegs({ points, orders, hideOrders }: { points: number; orders: number; hideOrders?: boolean }) {
   if (hideOrders) {
     return (
       <span className="flex gap-1" title="Orders hidden (Blind Orders)">
@@ -87,7 +92,7 @@ function Pegs({ points, orders, hideOrders }: { points: number; orders: number; 
   );
 }
 
-export function GuessRow({ g, hideOrders, highlight }: { g: GuessEntry; hideOrders?: boolean; highlight?: boolean }) {
+export const GuessRow = React.memo(function GuessRow({ g, hideOrders, highlight }: { g: GuessEntry; hideOrders?: boolean; highlight?: boolean }) {
   if (g.isTimeout) {
     return (
       <div className="flex items-center gap-2 px-2.5 py-2 rounded-xl border-2 border-dashed animate-rise"
@@ -113,9 +118,9 @@ export function GuessRow({ g, hideOrders, highlight }: { g: GuessEntry; hideOrde
       )}
     </div>
   );
-}
+});
 
-function TimerRing({ secondsLeft, total, active }: { secondsLeft: number; total: number; active: boolean }) {
+export function TimerRing({ secondsLeft, total, active }: { secondsLeft: number; total: number; active: boolean }) {
   if (total === 0) {
     return (
       <div className="w-[68px] h-[68px] rounded-full flex flex-col items-center justify-center border-[3px]"
@@ -148,7 +153,7 @@ function TimerRing({ secondsLeft, total, active }: { secondsLeft: number; total:
   );
 }
 
-function Stage({
+export function Stage({
   name, title, config, frameId, mood, line, isTurn, scoreLabel, floaters, align = "left", isBotThinking,
 }: {
   name: string; title?: string; config: AvatarConfig; frameId: string; mood: BotMood;
@@ -178,7 +183,7 @@ function Stage({
   );
 }
 
-function Keypad({
+export function Keypad({
   buffer, onDigit, onDelete, disabled, scratch, scratchMarks, autoOut,
 }: {
   buffer: string;
@@ -219,7 +224,7 @@ function Keypad({
   );
 }
 
-function InputTiles({ value, secret = false, shake }: { value: string; secret?: boolean; shake?: boolean }) {
+export function InputTiles({ value, secret = false, shake }: { value: string; secret?: boolean; shake?: boolean }) {
   return (
     <div className={`flex gap-2 justify-center ${shake ? "animate-shake" : ""}`}>
       {[0, 1, 2, 3].map((i) => {
@@ -238,56 +243,15 @@ function InputTiles({ value, secret = false, shake }: { value: string; secret?: 
   );
 }
 
-function fireWinEffect(effectId: string) {
-  const end = Date.now() + 1600;
-  const defaults = { origin: { y: 0.7 }, zIndex: 9999, disableForReducedMotion: true };
-  try {
-    switch (effectId) {
-      case "effect_lightning":
-        confetti({ ...defaults, particleCount: 130, spread: 100, colors: ["#FFD93D", "#1CB0F6", "#FFFFFF"], scalar: 0.9 });
-        confetti({ ...defaults, particleCount: 60, angle: 60, spread: 60, origin: { x: 0 }, colors: ["#FFD93D", "#1CB0F6"] });
-        confetti({ ...defaults, particleCount: 60, angle: 120, spread: 60, origin: { x: 1 }, colors: ["#FFD93D", "#1CB0F6"] });
-        break;
-      case "effect_stars": {
-        const star = confetti.shapeFromText ? confetti.shapeFromText({ text: "★", scalar: 2 }) : undefined;
-        confetti({ ...defaults, particleCount: 90, spread: 120, shapes: star ? [star] : undefined, colors: ["#FFD93D", "#FFC800", "#FFF3C4"], gravity: 0.7, scalar: 1.1 });
-        break;
-      }
-      case "effect_fireworks": {
-        const frame = () => {
-          confetti({ ...defaults, particleCount: 45, angle: 60, spread: 60, origin: { x: 0, y: 0.8 } });
-          confetti({ ...defaults, particleCount: 45, angle: 120, spread: 60, origin: { x: 1, y: 0.8 } });
-          confetti({ ...defaults, particleCount: 60, spread: 100, startVelocity: 42, origin: { x: Math.random(), y: 0.4 } });
-          if (Date.now() < end) requestAnimationFrame(frame);
-        };
-        frame();
-        break;
-      }
-      case "effect_matrix":
-        confetti({ ...defaults, particleCount: 160, spread: 130, colors: ["#00E676", "#58CC02", "#0B3D1E"], shapes: ["square"], gravity: 1.4, scalar: 0.8, ticks: 240 });
-        break;
-      case "effect_sparkle":
-        confetti({ ...defaults, particleCount: 110, spread: 90, colors: ["#FFD93D", "#FFF3C4", "#FFFFFF"], scalar: 0.75, gravity: 0.6, ticks: 260 });
-        break;
-      case "effect_shockwave":
-        confetti({ ...defaults, particleCount: 140, spread: 360, startVelocity: 32, gravity: 0.35, origin: { y: 0.5 }, colors: ["#FF4B4B", "#FF7A18", "#FFD93D"], ticks: 200 });
-        break;
-      default:
-        confetti({ ...defaults, particleCount: 120, spread: 85 });
-        confetti({ ...defaults, particleCount: 50, angle: 60, spread: 60, origin: { x: 0 } });
-        confetti({ ...defaults, particleCount: 50, angle: 120, spread: 60, origin: { x: 1 } });
-    }
-  } catch {}
-}
-
-function ResultOverlay({
-  title, subtitle, winnerConfig, loserConfig, winnerFrame, rewards, turns, onPlayAgain, onHome, playAgainLabel,
+export function ResultOverlay({
+  title, subtitle, winnerConfig, loserConfig, winnerFrame, rewards, turns, onPlayAgain, onHome, playAgainLabel, extra,
 }: {
   title: string; subtitle: string;
   winnerConfig: AvatarConfig; loserConfig: AvatarConfig; winnerFrame: string;
   rewards?: { coins: number; xp: number; trophies: number } | null;
   turns: number;
   onPlayAgain: () => void; onHome: () => void; playAgainLabel: string;
+  extra?: React.ReactNode;
 }) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -319,6 +283,7 @@ function ResultOverlay({
           </div>
         )}
 
+        {extra}
         <div className="grid grid-cols-2 gap-2.5 mt-5">
           <button onClick={onHome} className="btn-game btn-ghost py-3.5 flex items-center justify-center gap-2">
             <Home size={18} strokeWidth={2.6} /> Home
@@ -341,7 +306,7 @@ const TIPS = [
   "Watch your rival's pegs — they hint how close THEY are to your code!",
 ];
 
-function HeaderBar({
+export function HeaderBar({
   left, center, right, onBack, backTitle,
 }: {
   left: React.ReactNode; center: React.ReactNode; right: React.ReactNode;
@@ -373,7 +338,10 @@ function LocalGame({ me, config, onExit, onResult, showToast }: BoardProps) {
   const hideOrders = config.dailyRule === "no_orders_hint";
 
   const p2Name = bot ? bot.name : "Player 2";
-  const p2Config: AvatarConfig = bot ? bot.avatar : { base: "cat", color: "sky", accessory: "cap" };
+  const p2Config: AvatarConfig = useMemo(
+    () => (bot ? bot.avatar : { base: "cat", color: "sky", accessory: "cap" }),
+    [bot]
+  );
   const p2Frame = bot ? bot.frameId : "frame_neon";
 
   type Phase = "setup1" | "curtain_setup2" | "setup2" | "curtain_turn" | "playing" | "finished";
@@ -447,6 +415,22 @@ function LocalGame({ me, config, onExit, onResult, showToast }: BoardProps) {
       xp = iWon ? 60 : 35;
       trophies = 0;
     }
+    const history: HistoryEntry = {
+      historyId: newHistoryId(),
+      mode: isAI ? "ai" : "hotseat",
+      result: iWon ? "win" : "loss",
+      myName: me.username,
+      myAvatar: me.avatarConfig,
+      oppName: p2Name,
+      oppAvatar: p2Config,
+      oppPlayerId: null,
+      mySecret: G.current.p1Secret,
+      oppSecret: G.current.p2Secret,
+      guesses: finalGuesses,
+      endReason: "cracked",
+      turnsTaken: Math.max(1, myTurns),
+      createdAt: new Date().toISOString(),
+    };
     onResult({
       won: iWon,
       mode: isAI ? "ai" : "hotseat",
@@ -461,8 +445,9 @@ function LocalGame({ me, config, onExit, onResult, showToast }: BoardProps) {
       winnerName: iWon ? me.username : p2Name,
       myName: me.username,
       oppName: p2Name,
+      history,
     });
-  }, [bot, config.dailyChallengeId, isAI, me.effectId, me.username, onResult, p2Name]);
+  }, [bot, config.dailyChallengeId, isAI, me.avatarConfig, me.effectId, me.username, onResult, p2Config, p2Name]);
 
   const applyGuess = useCallback((slot: 1 | 2, guessStr: string, isTimeout: boolean) => {
     const st = G.current;
@@ -811,13 +796,16 @@ function LocalGame({ me, config, onExit, onResult, showToast }: BoardProps) {
 
 /* ============================== ONLINE GAME ============================= */
 
-function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast }: BoardProps) {
+function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast, authToken, onEnterRoom }: BoardProps) {
   const roomCode = config.roomCode!;
   const mySlot: 1 | 2 = config.slot || 1;
   const token = config.token || "";
   const oppSlot: 1 | 2 = mySlot === 1 ? 2 : 1;
 
   const [match, setMatch] = useState<MatchView | null>(null);
+  const oppPlayerId = match ? (mySlot === 1 ? match.player2Id : match.player1Id) : null;
+  const [rematchState, setRematchState] = useState<"idle" | "sent" | "incoming">("idle");
+  const [incomingInviteId, setIncomingInviteId] = useState<number | null>(null);
   const [buffer, setBuffer] = useState("");
   const [setupBuffer, setSetupBuffer] = useState("");
   const [mySecret, setMySecret] = useState(() => loadRoomSession()?.secret || "");
@@ -930,16 +918,20 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
     if (match.status === "abandoned") return "abandoned";
     if (match.status === "finished") return "finished";
     if (!match.hasPlayer2) return "waiting";
+    if (match.mode === "online_race") return "playing";
     const mineSet = mySlot === 1 ? match.hasSecret1 : match.hasSecret2;
     if (match.status !== "playing") return mineSet ? "waiting_secret" : "setup";
     return "playing";
   }, [match, mySlot]);
 
-  const myTurn = phase === "playing" && match?.currentTurn === mySlot;
+  const isRace = match?.mode === "online_race" || (!match && Boolean(config.race));
+  const myTurn = phase === "playing" && (isRace
+    ? (match?.guesses.filter((g) => g.playerSlot === mySlot).length ?? 0) < 15
+    : match?.currentTurn === mySlot);
 
   /* auto-submit expired turn (server validates real elapsed time) */
   useEffect(() => {
-    if (phase !== "playing" || !match || timerTotal === 0) return;
+    if (phase !== "playing" || !match || timerTotal === 0 || match.mode === "online_race") return;
     if (secondsLeft > 0) return;
     const key = `${match.turnStartedAt}-${match.currentTurn}-${match.guesses.length}`;
     if (timeoutAttempted.current === key) return;
@@ -954,25 +946,45 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
     if (phase !== "finished" || !match || recordedRef.current) return;
     recordedRef.current = true;
     const won = match.winnerSlot === mySlot;
-    setMyMood(won ? "win" : "lose");
-    setOppMood(won ? "lose" : "win");
-    if (won) { fireWinEffect(me.effectId); soundEngine.playVictory(); } else soundEngine.playDefeat();
+    const draw = match.winnerSlot == null;
+    const race = match.mode === "online_race";
+    setMyMood(won ? "win" : draw ? "happy" : "lose");
+    setOppMood(won ? "lose" : draw ? "happy" : "win");
+    if (won) { fireWinEffect(me.effectId); soundEngine.playVictory(); } else if (draw) soundEngine.playReward(); else soundEngine.playDefeat();
     saveRoomSession(null);
     const mine = match.guesses.filter((g) => g.playerSlot === mySlot);
+    const myNameR = mySlot === 1 ? match.player1Name : match.player2Name;
+    const oppNameR = mySlot === 1 ? match.player2Name : match.player1Name;
     onResult({
       won,
-      mode: "online_1v1",
+      mode: race ? "online_race" : "online_1v1",
       turnsTaken: Math.max(1, mine.filter((g) => !g.isTimeout).length),
       ordersTotal: mine.reduce((s, g) => s + g.orders, 0),
-      trophyDelta: computeTrophyDelta(won, "online_1v1"),
-      coinsEarned: won ? 90 : 25,
-      xpEarned: won ? 130 : 55,
+      trophyDelta: draw ? 0 : computeTrophyDelta(won, race ? "online_race" : "online_1v1"),
+      coinsEarned: race ? (won ? 80 : draw ? 40 : 20) : won ? 90 : 25,
+      xpEarned: race ? (won ? 120 : draw ? 70 : 50) : won ? 130 : 55,
       endReason: match.endReason || "cracked",
       winnerName: match.winnerName || "",
-      myName: mySlot === 1 ? match.player1Name : match.player2Name,
-      oppName: mySlot === 1 ? match.player2Name : match.player1Name,
+      myName: myNameR,
+      oppName: oppNameR,
+      history: {
+        historyId: newHistoryId(),
+        mode: race ? "online_race" : "online_1v1",
+        result: won ? "win" : draw ? "draw" : "loss",
+        myName: myNameR,
+        myAvatar: me.avatarConfig,
+        oppName: oppNameR,
+        oppAvatar: mySlot === 1 ? match.player2Avatar : match.player1Avatar,
+        oppPlayerId: mySlot === 1 ? match.player2Id : match.player1Id,
+        mySecret: race ? match.raceCode || "" : (mySlot === 1 ? match.secret1 : match.secret2) || "",
+        oppSecret: race ? match.raceCode || "" : (mySlot === 1 ? match.secret2 : match.secret1) || "",
+        guesses: match.guesses,
+        endReason: match.endReason || "cracked",
+        turnsTaken: Math.max(1, mine.filter((g) => !g.isTimeout).length),
+        createdAt: new Date().toISOString(),
+      },
     });
-  }, [phase, match, mySlot, me.effectId, onResult]);
+  }, [phase, match, mySlot, me.avatarConfig, me.effectId, onResult]);
 
   const myGuesses = match?.guesses.filter((g) => g.playerSlot === mySlot) || [];
   const oppGuesses = match?.guesses.filter((g) => g.playerSlot === oppSlot) || [];
@@ -1061,10 +1073,10 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
         const mine = m.guesses.filter((g) => g.playerSlot === mySlot);
         onResult({
           won: false,
-          mode: "online_1v1",
+          mode: m.mode === "online_race" ? "online_race" : "online_1v1",
           turnsTaken: Math.max(1, mine.filter((g) => !g.isTimeout).length),
           ordersTotal: mine.reduce((s, g) => s + g.orders, 0),
-          trophyDelta: computeTrophyDelta(false, "online_1v1"),
+          trophyDelta: computeTrophyDelta(false, m.mode === "online_race" ? "online_race" : "online_1v1"),
           coinsEarned: 10,
           xpEarned: 25,
           endReason: "forfeit",
@@ -1076,6 +1088,75 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
     } catch {}
     saveRoomSession(null);
     onExit();
+  };
+
+  /* ------------------------------ rematch flow ------------------------------ */
+  useEffect(() => {
+    if (phase !== "finished" || !authToken || !oppPlayerId || !onEnterRoom) return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/social?token=${authToken}`);
+        if (!alive || !res.ok) return;
+        const data = await res.json();
+        const accepted = (data.invitesOut || []).find(
+          (i: InviteView) => i.status === "accepted" && i.toPlayerId === oppPlayerId && i.roomCode && i.myToken
+        );
+        if (accepted && alive) {
+          onEnterRoom({ roomCode: accepted.roomCode as string, slot: 1, token: accepted.myToken as string, savedAt: Date.now(), timerSeconds: accepted.timerSeconds });
+          return;
+        }
+        const incoming = (data.invitesIn || []).find((i: InviteView) => i.fromPlayerId === oppPlayerId);
+        if (incoming && alive) {
+          setIncomingInviteId(incoming.id);
+          setRematchState("incoming");
+        }
+      } catch {}
+    };
+    poll();
+    const t = setInterval(poll, 2500);
+    return () => { alive = false; clearInterval(t); };
+  }, [phase, authToken, oppPlayerId, onEnterRoom]);
+
+  const sendRematch = async () => {
+    if (!authToken || !oppPlayerId) return;
+    setRematchState("sent");
+    soundEngine.playTap(660);
+    try {
+      const res = await fetch("/api/social", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "challenge", token: authToken, targetId: oppPlayerId, kind: "rematch", timerSeconds: timerTotal || 45 }),
+      });
+      const data = await res.json();
+      if (data.accepted && data.roomCode && data.token && onEnterRoom) {
+        onEnterRoom({ roomCode: data.roomCode, slot: (data.slot || 2) as 1 | 2, token: data.token, savedAt: Date.now(), timerSeconds: timerTotal || 45 });
+      } else if (!res.ok) {
+        setRematchState("idle");
+        showToast(data.error || "Rematch failed", "err");
+      }
+    } catch {
+      setRematchState("idle");
+      showToast("Rematch failed — check connection", "err");
+    }
+  };
+
+  const acceptRematch = async () => {
+    if (!authToken || !incomingInviteId) return;
+    try {
+      const res = await fetch("/api/social", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "respond_invite", token: authToken, inviteId: incomingInviteId, accept: true }),
+      });
+      const data = await res.json();
+      if (data.accepted && data.roomCode && data.token && onEnterRoom) {
+        onEnterRoom({ roomCode: data.roomCode, slot: 2, token: data.token, savedAt: Date.now(), timerSeconds: timerTotal || 45 });
+      } else {
+        showToast(data.error || "Rematch failed", "err");
+        setRematchState("idle");
+      }
+    } catch {
+      showToast("Rematch failed — check connection", "err");
+    }
   };
 
   const claimWin = async () => {
@@ -1110,6 +1191,8 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
 
   const best = (list: GuessEntry[]) => list.reduce((mx, g) => Math.max(mx, g.orders), 0);
   const iWon = match?.winnerSlot === mySlot;
+  const isDraw = Boolean(match && match.status === "finished" && match.winnerSlot == null);
+  const lastOppMsg = [...social.messages].reverse().find((msg) => msg.senderSlot !== mySlot)?.content;
 
   return (
     <div className="board-theme min-h-[100dvh] flex flex-col" data-board={me.themeId}>
@@ -1122,11 +1205,27 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
             scoreLabel={`${myGuesses.length} guesses · best ${best(myGuesses)}/4`} floaters={social.floaters} align="left" />
         }
         center={
-          <div className="flex flex-col items-center gap-1.5">
-            <TimerRing secondsLeft={secondsLeft} total={timerTotal} active={phase === "playing"} />
+          <div className="flex flex-col items-center gap-1.5 relative">
+            {social.unread > 0 && lastOppMsg && !chatOpen && (
+              <button onClick={() => { setChatOpen(true); social.markRead(true); }}
+                className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 max-w-[170px] truncate text-[11px] font-black px-2.5 py-1 rounded-full shadow-lg animate-pop whitespace-nowrap"
+                style={{ background: "#26283B", color: "#fff" }}>
+                💬 {lastOppMsg}
+              </button>
+            )}
+            {isRace ? (
+              <div className="w-[68px] h-[68px] rounded-full flex flex-col items-center justify-center border-[3px]"
+                style={{ background: "var(--board-panel)", borderColor: "var(--board-border)", color: "var(--board-ink)" }}>
+                <span className="text-base leading-none">🏁</span>
+                <span className="font-display font-bold text-sm leading-none mt-0.5">{myGuesses.length}–{oppGuesses.length}</span>
+                <span className="text-[8px] font-black tracking-widest">RACE</span>
+              </div>
+            ) : (
+              <TimerRing secondsLeft={secondsLeft} total={timerTotal} active={phase === "playing"} />
+            )}
             <button onClick={() => { setChatOpen(true); social.markRead(true); }} className="btn-game relative w-10 h-10 !rounded-full flex items-center justify-center"
               style={{ background: "var(--board-key)", color: "var(--board-ink)", border: "2px solid var(--board-border)", boxShadow: "0 3px 0 var(--board-border)" }} title="Chat with rival">
-              <MessageCircle size={18} strokeWidth={2.6} />
+              <span className={social.unread > 0 ? "animate-wiggle inline-flex" : "inline-flex"}><MessageCircle size={18} strokeWidth={2.6} /></span>
               {social.unread > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-[#FF4B4B] text-white text-[10px] font-black flex items-center justify-center animate-pop">
                   {social.unread}
@@ -1157,7 +1256,7 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
           {phase === "waiting" && "Waiting for a rival to join..."}
           {phase === "setup" && "Hide your secret code!"}
           {phase === "waiting_secret" && (oppOffline ? `${oppName} seems to be away...` : `Locked in! Waiting for ${oppName} to hide their code...`)}
-          {phase === "playing" && (myTurn ? "Your turn — crack their code!" : oppOffline ? `${oppName} may have disconnected...` : `${oppName} is guessing...`)}
+          {phase === "playing" && (isRace ? "🏁 RACE — first to crack the shared code wins!" : myTurn ? "Your turn — crack their code!" : oppOffline ? `${oppName} may have disconnected...` : `${oppName} is guessing...`)}
           {phase === "finished" && "Match over!"}
           {phase === "abandoned" && "This match was closed."}
         </div>
@@ -1248,7 +1347,7 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
                 <button onClick={submitGuess} disabled={!myTurn || buffer.length !== 4 || submitting || scratch}
                   className="btn-game btn-green w-full py-3.5 text-lg flex items-center justify-center gap-2">
                   <Swords size={20} strokeWidth={2.7} />
-                  {submitting ? "Sending..." : scratch ? "Tap digits to mark them" : myTurn ? "GUESS!" : `Waiting for ${oppName}...`}
+                  {submitting ? "Sending..." : scratch ? "Tap digits to mark them" : isRace ? (myTurn ? "GUESS — FAST!" : "Out of guesses!") : myTurn ? "GUESS!" : `Waiting for ${oppName}...`}
                 </button>
                 {mySecret && (
                   <p className="text-center text-[11px] font-bold flex items-center justify-center gap-1.5" style={{ color: "var(--board-soft)" }}>
@@ -1280,21 +1379,38 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
 
       {phase === "finished" && match && (
         <ResultOverlay
-          title={iWon ? "YOU CRACKED IT!" : `${oppName} wins this one`}
+          title={isDraw ? "DEAD HEAT! 🤝" : iWon ? (isRace ? "YOU WIN THE RACE! 🏁" : "YOU CRACKED IT!") : `${oppName} wins this one`}
           subtitle={
-            match.endReason === "disconnect" ? (iWon ? "Your rival disconnected — victory is yours!" : "You were disconnected for too long.")
+            match.endReason === "race_draw" ? `Nobody cracked ${match.raceCode || "the code"} — tied on best guess!`
+            : match.endReason === "raced" ? (iWon ? "Fastest brain in the arena! 🏁" : "Out-raced this time — run it back!")
+            : match.endReason === "disconnect" ? (iWon ? "Your rival disconnected — victory is yours!" : "You were disconnected for too long.")
             : match.endReason === "forfeit" ? (iWon ? "Your rival left the match." : "You left the match.")
             : match.endReason === "afk" ? (iWon ? "Your rival ran out of turns (AFK)." : "Too many timeouts — stay in the game!")
             : iWon ? "Brilliant detective work!" : "Great duel — run it back!"
           }
-          winnerConfig={iWon ? me.avatarConfig : oppAvatar}
-          loserConfig={iWon ? oppAvatar : me.avatarConfig}
-          winnerFrame={iWon ? me.frameId : oppFrame}
-          rewards={{ coins: iWon ? 90 : 25, xp: iWon ? 130 : 55, trophies: computeTrophyDelta(iWon, "online_1v1") }}
+          winnerConfig={iWon || isDraw ? me.avatarConfig : oppAvatar}
+          loserConfig={iWon || isDraw ? oppAvatar : me.avatarConfig}
+          winnerFrame={iWon || isDraw ? me.frameId : oppFrame}
+          rewards={{
+            coins: isRace ? (iWon ? 80 : isDraw ? 40 : 20) : iWon ? 90 : 25,
+            xp: isRace ? (iWon ? 120 : isDraw ? 70 : 50) : iWon ? 130 : 55,
+            trophies: isDraw ? 0 : computeTrophyDelta(iWon, isRace ? "online_race" : "online_1v1"),
+          }}
           turns={match.guesses.filter((g) => g.playerSlot === match.winnerSlot && !g.isTimeout).length}
           onPlayAgain={() => (onPlayAgainOnline ? onPlayAgainOnline() : onExit())}
           onHome={onExit}
           playAgainLabel="Find new rival"
+          extra={oppPlayerId && authToken && onEnterRoom ? (
+            rematchState === "incoming" ? (
+              <button onClick={acceptRematch} className="btn-game btn-purple w-full py-3 mt-4 animate-invite-ring">
+                ↩️ {oppName} wants a rematch — Accept!
+              </button>
+            ) : (
+              <button onClick={sendRematch} disabled={rematchState === "sent"} className="btn-game btn-purple w-full py-3 mt-4">
+                {rematchState === "sent" ? `Rematch sent — waiting for ${oppName}...` : "↩️ Rematch!"}
+              </button>
+            )
+          ) : undefined}
         />
       )}
 
@@ -1323,7 +1439,356 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
   );
 }
 
+
+/* ============================== RACE (vs bot) ============================= */
+
+function MaskedRow({ g }: { g: GuessEntry }) {
+  return (
+    <div className="flex items-center gap-2 px-2 py-1.5 rounded-xl animate-rise">
+      <span className="flex gap-1">
+        {[0, 1, 2, 3].map((i) => (
+          <span key={i} className="digit-tile w-8 h-9 flex items-center justify-center text-lg" style={{ color: "var(--board-soft)" }}>•</span>
+        ))}
+      </span>
+      <Pegs points={g.points} orders={g.orders} />
+      <span className="text-[10px] font-black leading-tight" style={{ color: "var(--board-soft)" }}>
+        {g.points} digits<br />{g.orders} placed
+      </span>
+    </div>
+  );
+}
+
+const RACE_CAP = 15;
+
+function RaceGame({ me, config, onExit, onResult, showToast }: BoardProps) {
+  const bot = AI_BOTS[config.aiDifficulty || "Tactician"];
+  const [phase, setPhase] = useState<"intro" | "racing" | "finished">("intro");
+  const [round, setRound] = useState(0);
+  const [secret, setSecret] = useState(() => generateRandomCode());
+  const [myGuesses, setMyGuesses] = useState<GuessEntry[]>([]);
+  const [botGuesses, setBotGuesses] = useState<GuessEntry[]>([]);
+  const [buffer, setBuffer] = useState("");
+  const [winner, setWinner] = useState<"me" | "bot" | "draw" | null>(null);
+  const [myMood, setMyMood] = useState<BotMood>("idle");
+  const [oppMood, setOppMood] = useState<BotMood>("idle");
+  const [botLine, setBotLine] = useState("Same code for both of us. First to crack it wins! 🏁");
+  const [floaters, setFloaters] = useState<Floater[]>([]);
+  const [elapsed, setElapsed] = useState(0);
+  const [shakeTiles, setShakeTiles] = useState(false);
+
+  const recordedRef = useRef(false);
+  const botTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startedAt = useRef(0);
+  const stRef = useRef({ phase, myGuesses, botGuesses, winner, secret });
+  // eslint-disable-next-line react-hooks/refs
+  stRef.current = { phase, myGuesses, botGuesses, winner, secret };
+
+  const bestOf = (list: GuessEntry[]) => list.reduce((mx, g) => Math.max(mx, g.orders * 10 + g.points), 0);
+  const bestOrders = (list: GuessEntry[]) => list.reduce((mx, g) => Math.max(mx, g.orders), 0);
+
+  const pushFloater = useCallback((reaction: string, fromOpponent: boolean) => {
+    const key = `${Date.now()}-${Math.random()}`;
+    setFloaters((f) => [...f.slice(-5), { key, reaction, fromOpponent }]);
+    setTimeout(() => setFloaters((f) => f.filter((x) => x.key !== key)), 2300);
+  }, []);
+
+  const finalize = useCallback((w: "me" | "bot" | "draw", mine: GuessEntry[], theirs: GuessEntry[]) => {
+    setWinner(w);
+    setPhase("finished");
+    setMyMood(w === "me" ? "win" : w === "draw" ? "happy" : "lose");
+    setOppMood(w === "bot" ? "win" : w === "draw" ? "happy" : "lose");
+    setBotLine(w === "me" ? pickLine(bot.lines.botLose) : w === "bot" ? pickLine(bot.lines.botWin) : "A dead heat! Impressive.");
+    if (w === "me") { fireWinEffect(me.effectId); soundEngine.playVictory(); }
+    else if (w === "draw") soundEngine.playReward();
+    else soundEngine.playDefeat();
+    if (recordedRef.current) return;
+    recordedRef.current = true;
+    const merged = [...mine, ...theirs].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    const won = w === "me";
+    onResult({
+      won,
+      mode: "ai",
+      turnsTaken: Math.max(1, mine.length),
+      ordersTotal: mine.reduce((sum, g) => sum + g.orders, 0),
+      aiDifficulty: bot.difficulty,
+      trophyDelta: w === "draw" ? 0 : computeTrophyDelta(won, "ai", bot.difficulty),
+      coinsEarned: won ? bot.rewardCoins : w === "draw" ? 40 : 15,
+      xpEarned: won ? bot.rewardXp : w === "draw" ? 60 : 40,
+      endReason: w === "draw" ? "race_draw" : "raced",
+      winnerName: w === "me" ? me.username : bot.name,
+      myName: me.username,
+      oppName: bot.name,
+      history: {
+        historyId: newHistoryId(),
+        mode: "race",
+        result: w === "me" ? "win" : w === "draw" ? "draw" : "loss",
+        myName: me.username,
+        myAvatar: me.avatarConfig,
+        oppName: bot.name,
+        oppAvatar: bot.avatar,
+        oppPlayerId: null,
+        mySecret: stRef.current.secret,
+        oppSecret: stRef.current.secret,
+        guesses: merged,
+        endReason: w === "draw" ? "race_draw" : "raced",
+        turnsTaken: Math.max(1, mine.length),
+        createdAt: new Date().toISOString(),
+      },
+    });
+  }, [bot, me.avatarConfig, me.effectId, me.username, onResult]);
+
+  const checkEnd = useCallback((mine: GuessEntry[], theirs: GuessEntry[]): boolean => {
+    const myWin = mine.length > 0 && mine[mine.length - 1].orders === 4;
+    const botWin = theirs.length > 0 && theirs[theirs.length - 1].orders === 4;
+    if (myWin) { finalize("me", mine, theirs); return true; }
+    if (botWin) { finalize("bot", mine, theirs); return true; }
+    if (mine.length >= RACE_CAP && theirs.length >= RACE_CAP) {
+      const bMe = bestOf(mine);
+      const bBot = bestOf(theirs);
+      finalize(bMe === bBot ? "draw" : bMe > bBot ? "me" : "bot", mine, theirs);
+      return true;
+    }
+    return false;
+  }, [finalize]);
+
+  /* bot racer loop */
+  useEffect(() => {
+    if (phase !== "racing") return;
+    let alive = true;
+    const step = () => {
+      if (!alive) return;
+      const st = stRef.current;
+      if (st.phase !== "racing" || st.winner) return;
+      if (st.botGuesses.length >= RACE_CAP) return;
+      const past = st.botGuesses.map((g) => ({ guess: g.guess, points: g.points, orders: g.orders }));
+      let decision;
+      try { decision = computeAINextGuess(bot.difficulty, past); }
+      catch { decision = { guess: generateRandomCode(), candidateCount: 0, thoughtText: "" }; }
+      const res = evaluateGuess(st.secret, decision.guess);
+      const entry: GuessEntry = {
+        id: makeId("g"), playerSlot: 2, playerName: bot.name, guess: decision.guess,
+        points: res.points, orders: res.orders, isTimeout: false,
+        turnNumber: st.botGuesses.length + 1, timestamp: new Date().toISOString(),
+      };
+      const nextBot = [...st.botGuesses, entry];
+      setBotGuesses(nextBot);
+      soundEngine.playFeedback(res.points, res.orders);
+      if (res.orders >= 3) { setBotLine(pickLine(bot.lines.goodGuess)); setOppMood("happy"); setMyMood("shocked"); }
+      else if (res.points === 0) { setBotLine(pickLine(bot.lines.badGuess)); setOppMood("sad"); }
+      if (!checkEnd(st.myGuesses, nextBot)) {
+        botTimer.current = setTimeout(step, bot.thinkMinMs + 500 + Math.random() * (bot.thinkMaxMs - bot.thinkMinMs));
+      }
+    };
+    botTimer.current = setTimeout(step, bot.thinkMinMs + 400);
+    return () => { alive = false; if (botTimer.current) clearTimeout(botTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, round]);
+
+  /* elapsed clock */
+  useEffect(() => {
+    if (phase !== "racing") return;
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt.current) / 1000)), 500);
+    return () => clearInterval(t);
+  }, [phase]);
+
+  const autoOut = useMemo(() => {
+    const out = new Set<string>();
+    for (const g of myGuesses) if (g.points === 0) for (const ch of g.guess) out.add(ch);
+    return out;
+  }, [myGuesses]);
+
+  const canGuess = phase === "racing" && myGuesses.length < RACE_CAP;
+
+  const submitGuess = () => {
+    if (!canGuess || !isValidSecretCode(buffer)) { setShakeTiles(true); setTimeout(() => setShakeTiles(false), 450); return; }
+    if (myGuesses.some((g) => g.guess === buffer)) { showToast("You already tried that code!", "err"); return; }
+    const res = evaluateGuess(secret, buffer);
+    const entry: GuessEntry = {
+      id: makeId("g"), playerSlot: 1, playerName: me.username, guess: buffer,
+      points: res.points, orders: res.orders, isTimeout: false,
+      turnNumber: myGuesses.length + 1, timestamp: new Date().toISOString(),
+    };
+    const nextMine = [...myGuesses, entry];
+    setMyGuesses(nextMine);
+    setBuffer("");
+    soundEngine.playFeedback(res.points, res.orders);
+    if (res.orders >= 3) { setBotLine(pickLine(bot.lines.playerClose)); setOppMood("shocked"); setMyMood("happy"); }
+    else if (res.points === 0) setMyMood("sad");
+    else setMyMood("idle");
+    checkEnd(nextMine, stRef.current.botGuesses);
+  };
+
+  const pressDigit = (d: string) => {
+    if (!canGuess) return;
+    if (buffer.includes(d) || buffer.length >= 4) { setShakeTiles(true); setTimeout(() => setShakeTiles(false), 450); return; }
+    soundEngine.playTap(440 + Number(d) * 25);
+    setBuffer(buffer + d);
+  };
+  const pressDelete = () => { soundEngine.playDelete(); setBuffer((b) => b.slice(0, -1)); };
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key >= "1" && e.key <= "9") pressDigit(e.key);
+      else if (e.key === "Backspace") { e.preventDefault(); pressDelete(); }
+      else if (e.key === "Enter") submitGuess();
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  });
+
+  const startRace = () => {
+    startedAt.current = Date.now();
+    setElapsed(0);
+    setPhase("racing");
+    soundEngine.playJoin();
+  };
+
+  const resetRace = () => {
+    recordedRef.current = false;
+    setRound((r) => r + 1);
+    setSecret(generateRandomCode());
+    setMyGuesses([]); setBotGuesses([]); setBuffer(""); setWinner(null);
+    setMyMood("idle"); setOppMood("idle");
+    setBotLine("New code, new race. GO! 🏁");
+    startedAt.current = Date.now();
+    setElapsed(0);
+    setPhase("racing");
+  };
+
+  const onReactLocal = (id: string) => {
+    pushFloater(id, false);
+    if (phase === "racing" && Math.random() < 0.6) {
+      setTimeout(() => pushFloater(["joy", "fire", "clap", "mindblown"][Math.floor(Math.random() * 4)], true), 650);
+    }
+  };
+
+  const mm = String(Math.floor(elapsed / 60));
+  const ss = String(elapsed % 60).padStart(2, "0");
+
+  return (
+    <div className="board-theme min-h-[100dvh] flex flex-col" data-board={me.themeId}>
+      <HeaderBar
+        onBack={() => { if (phase === "racing") showToast("Race left — no rewards recorded."); onExit(); }}
+        backTitle="Leave race"
+        left={
+          <Stage name={me.username} title="You" config={me.avatarConfig} frameId={me.frameId}
+            mood={myMood} isTurn={phase === "racing"}
+            scoreLabel={`${myGuesses.length}/${RACE_CAP} guesses · best ${bestOrders(myGuesses)}/4`} floaters={floaters} align="left" />
+        }
+        center={
+          <div className="w-[72px] h-[72px] rounded-full flex flex-col items-center justify-center border-[3px]"
+            style={{ background: "var(--board-panel)", borderColor: "var(--board-border)", color: "var(--board-ink)" }}>
+            <span className="text-lg leading-none">🏁</span>
+            <span className="font-display font-bold text-sm leading-none mt-0.5">{myGuesses.length}–{botGuesses.length}</span>
+            <span className="text-[8px] font-black tracking-widest">{mm}:{ss}</span>
+          </div>
+        }
+        right={
+          <Stage name={bot.name} title={bot.title} config={bot.avatar} frameId={bot.frameId}
+            mood={oppMood} line={botLine} isTurn={phase === "racing"}
+            scoreLabel={`${botGuesses.length}/${RACE_CAP} guesses · best ${bestOrders(botGuesses)}/4`} floaters={floaters} align="right"
+            isBotThinking={phase === "racing" && botGuesses.length < RACE_CAP && !winner} />
+        }
+      />
+
+      <div className="max-w-5xl w-full mx-auto px-3 sm:px-5 mt-2">
+        <div className="rounded-2xl px-4 py-2 text-center font-display font-semibold text-sm sm:text-base"
+          style={{ background: "var(--board-panel)", color: "var(--board-ink)", border: "2px solid var(--board-border)" }}>
+          {phase === "intro" && "🏁 Race Mode — same code, first to crack it wins!"}
+          {phase === "racing" && (canGuess ? "GO GO GO — crack it first!" : `Out of guesses! ${bot.name} is still racing...`)}
+          {phase === "finished" && "Race over!"}
+        </div>
+        {/* progress bars */}
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          {[{ label: "You", list: myGuesses, color: "#58CC02" }, { label: bot.name, list: botGuesses, color: bot.accent }].map((row) => (
+            <div key={row.label}>
+              <div className="h-3.5 rounded-full overflow-hidden" style={{ background: "var(--board-key)", border: "2px solid var(--board-border)" }}>
+                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${(bestOrders(row.list) / 4) * 100}%`, background: row.color }} />
+              </div>
+              <p className="text-[10px] font-black mt-0.5" style={{ color: "var(--board-soft)" }}>{row.label}: {bestOrders(row.list)}/4 digits placed</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {phase === "intro" ? (
+        <div className="flex-1 flex items-center justify-center px-4 py-8">
+          <div className="card-game max-w-md w-full p-6 text-center animate-pop">
+            <div className="flex items-end justify-center gap-3">
+              <CharacterAvatar config={me.avatarConfig} frameId={me.frameId} mood="happy" size={84} ringWidth={4} />
+              <span className="font-display font-bold text-xl pb-6">VS</span>
+              <CharacterAvatar config={bot.avatar} frameId={bot.frameId} mood="happy" size={84} ringWidth={4} />
+            </div>
+            <h3 className="font-display font-bold text-2xl mt-3">Code Race! 🏁</h3>
+            <p className="font-bold text-sm mt-1" style={{ color: "var(--ink-soft)" }}>
+              You and {bot.name} crack the <b>same secret code</b> at the same time. No turns — guess as fast as you can think! First to crack it wins (max {RACE_CAP} guesses each).
+            </p>
+            <button onClick={startRace} className="btn-game btn-green w-full py-4 text-xl mt-4">Start the race!</button>
+            <p className="text-[11px] font-bold mt-2" style={{ color: "var(--ink-faint)" }}>You can watch {bot.name}&rsquo;s pegs — but their digits stay hidden until the end. Fair race!</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex-1 w-full max-w-5xl mx-auto px-3 sm:px-5 py-3 grid sm:grid-cols-2 gap-3 content-start overflow-y-auto pretty-scroll">
+            <div className="rounded-2xl p-3" style={{ background: "var(--board-panel)", border: "2px solid var(--board-border)" }}>
+              <p className="text-[11px] font-black uppercase tracking-widest mb-2" style={{ color: "var(--board-soft)" }}>Your guesses</p>
+              <div className="space-y-1.5">
+                {myGuesses.length === 0 && <p className="text-sm font-bold py-3 text-center" style={{ color: "var(--board-soft)" }}>No guesses yet — GO!</p>}
+                {myGuesses.map((g, i) => <GuessRow key={g.id} g={g} highlight={i === myGuesses.length - 1} />)}
+              </div>
+            </div>
+            <div className="rounded-2xl p-3" style={{ background: "var(--board-panel)", border: "2px solid var(--board-border)" }}>
+              <p className="text-[11px] font-black uppercase tracking-widest mb-2" style={{ color: "var(--board-soft)" }}>{bot.name}&rsquo;s guesses {phase !== "finished" ? "(digits hidden)" : ""}</p>
+              <div className="space-y-1.5">
+                {botGuesses.length === 0 && <p className="text-sm font-bold py-3 text-center" style={{ color: "var(--board-soft)" }}>Thinking...</p>}
+                {botGuesses.map((g, i) => phase === "finished"
+                  ? <GuessRow key={g.id} g={g} highlight={i === botGuesses.length - 1} />
+                  : <MaskedRow key={g.id} g={g} />)}
+              </div>
+            </div>
+          </div>
+
+          {phase === "racing" && (
+            <div className="sticky bottom-0 z-30 px-3 sm:px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2"
+              style={{ background: "color-mix(in srgb, var(--board-panel) 92%, transparent)", backdropFilter: "blur(10px)", borderTop: "2px solid var(--board-border)" }}>
+              <div className="max-w-xl mx-auto space-y-2.5">
+                <ReactionsBar onReact={onReactLocal} compact />
+                <InputTiles value={buffer} shake={shakeTiles} />
+                <Keypad buffer={buffer} onDigit={pressDigit} onDelete={pressDelete} disabled={!canGuess} scratch={false} scratchMarks={{}} autoOut={autoOut} />
+                <button onClick={submitGuess} disabled={!canGuess || buffer.length !== 4}
+                  className="btn-game btn-green w-full py-3.5 text-lg flex items-center justify-center gap-2">
+                  <Swords size={20} strokeWidth={2.7} /> {canGuess ? "GUESS — FAST!" : "Out of guesses!"}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {phase === "finished" && winner && (
+        <ResultOverlay
+          title={winner === "me" ? "YOU WIN THE RACE! 🏁" : winner === "draw" ? "DEAD HEAT! 🤝" : `${bot.name} was faster!`}
+          subtitle={winner === "me" ? `You cracked ${secret} in ${myGuesses.length} guesses!` : winner === "draw" ? `Nobody cracked ${secret} — you tied on best guess!` : `The code was ${secret}. Rematch?`}
+          winnerConfig={winner === "bot" ? bot.avatar : me.avatarConfig}
+          loserConfig={winner === "bot" ? me.avatarConfig : bot.avatar}
+          winnerFrame={winner === "bot" ? bot.frameId : me.frameId}
+          rewards={{
+            coins: winner === "me" ? bot.rewardCoins : winner === "draw" ? 40 : 15,
+            xp: winner === "me" ? bot.rewardXp : winner === "draw" ? 60 : 40,
+            trophies: winner === "draw" ? 0 : computeTrophyDelta(winner === "me", "ai", bot.difficulty),
+          }}
+          turns={winner === "bot" ? botGuesses.length : myGuesses.length}
+          onPlayAgain={resetRace}
+          onHome={onExit}
+          playAgainLabel="Race again"
+        />
+      )}
+    </div>
+  );
+}
+
 export default function GameBoard(props: BoardProps) {
   if (props.config.mode === "online") return <OnlineGame {...props} />;
+  if (props.config.mode === "race") return <RaceGame {...props} />;
   return <LocalGame {...props} />;
 }

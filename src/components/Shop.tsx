@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import confetti from "canvas-confetti";
 import { ArrowLeft, Check, Coins, Gem, Lock, Shirt, Frame as FrameIcon, Palette, Sparkles, Tag, Play, MousePointerClick } from "lucide-react";
 import { RARITY_COLORS, SHOP_ITEMS, type CosmeticCategory, type CosmeticItem } from "@/lib/game-engine";
-import { BOARD_THEMES, getAvatarColor, type AvatarConfig } from "@/lib/avatar";
+import { BOARD_THEMES, WIN_EFFECTS, getAvatarColor, type AvatarConfig } from "@/lib/avatar";
+import { fireWinEffect } from "@/lib/win-effects";
 import { Character, CharacterAvatar } from "./Character";
 import type { Player } from "@/lib/types";
 import { soundEngine } from "@/lib/sound-effects";
@@ -24,6 +24,7 @@ function isEquipped(me: Player, item: CosmeticItem): boolean {
     case "avatar_base": return me.avatarConfig.base === item.meta;
     case "avatar_color": return me.avatarConfig.color === item.meta;
     case "avatar_accessory": return me.avatarConfig.accessory === item.meta;
+    case "avatar_pattern": return (me.avatarConfig.pattern || "none") === item.meta;
     case "frame": return me.frameId === item.id;
     case "theme": return me.themeId === item.id;
     case "effect": return me.effectId === item.id;
@@ -35,6 +36,7 @@ function previewWith(cfg: AvatarConfig, item: CosmeticItem): AvatarConfig {
   if (item.category === "avatar_base") return { ...cfg, base: item.meta };
   if (item.category === "avatar_color") return { ...cfg, color: item.meta };
   if (item.category === "avatar_accessory") return { ...cfg, accessory: item.meta };
+  if (item.category === "avatar_pattern") return { ...cfg, pattern: item.meta };
   return cfg;
 }
 
@@ -76,14 +78,7 @@ export default function Shop({
     if (item.category === "effect") testEffect(item.id);
   };
 
-  const testEffect = (id: string) => {
-    try {
-      if (id === "effect_matrix") confetti({ particleCount: 90, spread: 100, colors: ["#00E676", "#58CC02"], shapes: ["square"], origin: { y: 0.4 }, zIndex: 9999 });
-      else if (id === "effect_lightning") confetti({ particleCount: 90, spread: 100, colors: ["#FFD93D", "#1CB0F6"], origin: { y: 0.4 }, zIndex: 9999 });
-      else if (id === "effect_shockwave") confetti({ particleCount: 110, spread: 360, startVelocity: 26, gravity: 0.3, origin: { y: 0.4 }, colors: ["#FF4B4B", "#FF7A18"], zIndex: 9999 });
-      else confetti({ particleCount: 90, spread: 90, origin: { y: 0.4 }, zIndex: 9999 });
-    } catch {}
-  };
+  const testEffect = (id: string) => { void fireWinEffect(id); };
 
   const owned = (item: CosmeticItem) => me.ownedCosmetics.includes(item.id);
   const canAfford = (item: CosmeticItem) =>
@@ -111,6 +106,7 @@ export default function Shop({
           {item.category === "avatar_base" && <Character config={{ ...me.avatarConfig, base: item.meta }} size={72} />}
           {item.category === "avatar_color" && <Character config={{ base: me.avatarConfig.base, color: item.meta, accessory: "none" }} size={72} />}
           {item.category === "avatar_accessory" && <Character config={{ base: me.avatarConfig.base, color: me.avatarConfig.color, accessory: item.meta }} size={72} />}
+          {item.category === "avatar_pattern" && <Character config={{ ...me.avatarConfig, pattern: item.meta }} size={72} />}
           {item.category === "frame" && <CharacterAvatar config={me.avatarConfig} frameId={item.id} size={62} />}
           {item.category === "theme" && (
             <div className="w-full h-full p-1.5 board-theme" data-board={item.id}>
@@ -121,7 +117,7 @@ export default function Shop({
             </div>
           )}
           {item.category === "effect" && (
-            <span className="w-14 h-14 rounded-2xl flex items-center justify-center text-white" style={{ background: "linear-gradient(135deg,#A560E8,#1CB0F6)" }}>
+            <span className="w-14 h-14 rounded-2xl flex items-center justify-center text-white shadow-inner" style={{ background: WIN_EFFECTS.find((e) => e.id === item.id)?.swatch || "linear-gradient(135deg,#A560E8,#1CB0F6)" }}>
               <Sparkles size={28} strokeWidth={2.4} />
             </span>
           )}
@@ -220,6 +216,7 @@ export default function Shop({
           {charSection("avatar_base", "Choose your character")}
           {charSection("avatar_color", "Colors")}
           {charSection("avatar_accessory", "Accessories")}
+          {charSection("avatar_pattern", "Patterns")}
         </div>
       ) : (
         <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2">

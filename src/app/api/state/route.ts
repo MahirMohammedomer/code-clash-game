@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { players, resultLog } from "@/db/schema";
+import { players, resultLog, matchHistory, follows, matches } from "@/db/schema";
 import { ensureDatabaseReady } from "@/db/seed";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and, gt, or, inArray } from "drizzle-orm";
 import {
   getDivisionForTrophies,
   getShopItem,
@@ -11,6 +11,11 @@ import {
   ACHIEVEMENTS,
   emptyDailyStats,
   getDailyChallenge,
+  currentSeasonId,
+  seasonLabel,
+  seasonDaysLeft,
+  SEASON_REWARDS,
+  isValidSecretCode,
   type DailyStats,
 } from "@/lib/game-engine";
 import { normalizeAvatar } from "@/lib/avatar";
@@ -93,6 +98,91 @@ async function applyStreak(p: PlayerRow, tzEast: number) {
   };
 }
 
+/**
+ * Ranked seasons (calendar months). First sight (seasonId === "") just stamps
+ * the current season — nobody loses trophies for the feature launching.
+ * A real rollover pays rewards by peak division and soft-resets trophies 50%.
+ */
+async function applySeason(p: PlayerRow) {
+  const cur = currentSeasonId();
+  const info = { id: cur, label: seasonLabel(cur), daysLeft: seasonDaysLeft(), rolled: null as null | object };
+  if (p.seasonId === cur) return { player: p, season: info };
+  if (!p.seasonId) {
+    const [updated] = await db
+      .update(players)
+      .set({ seasonId: cur, seasonPeakTrophies: Math.max(p.seasonPeakTrophies || 0, p.trophies), seasonXp: 0 })
+      .where(eq(players.id, p.id))
+      .returning();
+    return { player: updated, season: info };
+  }
+  const peak = Math.max(p.seasonPeakTrophies || 0, p.trophies);
+  const prevDivision = getDivisionForTrophies(peak).name;
+  const reward = SEASON_REWARDS[prevDivision];
+  const resetTo = Math.floor(p.trophies * 0.5);
+  const [updated] = await db
+    .update(players)
+    .set({
+      seasonId: cur,
+      seasonPeakTrophies: resetTo,
+      seasonXp: 0,
+      trophies: resetTo,
+      division: getDivisionForTrophies(resetTo).name,
+      coins: p.coins + reward.coins,
+      gems: p.gems + reward.gems,
+    })
+    .where(eq(players.id, p.id))
+    .returning();
+  return {
+    player: updated,
+    season: { ...info, rolled: { prevDivision, coins: reward.coins, gems: reward.gems, trophiesResetTo: resetTo } },
+  };
+}
+
+/** Validate + persist a client-reported match record for replays. Never throws. */
+async function saveHistory(playerId: number, raw: unknown, fallback: { won: boolean; mode: string; turnsTaken: number }) {
+  try {
+    if (!raw || typeof raw !== "object") return;
+    const h = raw as Record<string, unknown>;
+    const historyId = String(h.historyId || "").slice(0, 60);
+    if (!historyId) return;
+    const rawGuesses = Array.isArray(h.guesses) ? h.guesses.slice(0, 90) : [];
+    const guesses = rawGuesses.map((g) => {
+      const e = (g || {}) as Record<string, unknown>;
+      return {
+        id: String(e.id || "").slice(0, 40),
+        playerSlot: (e.playerSlot === 2 ? 2 : 1) as 1 | 2,
+        playerName: String(e.playerName || "").slice(0, 24),
+        guess: String(e.guess || "").slice(0, 8),
+        points: Math.max(0, Math.min(4, Number(e.points || 0))),
+        orders: Math.max(0, Math.min(4, Number(e.orders || 0))),
+        isTimeout: Boolean(e.isTimeout),
+        turnNumber: Math.max(0, Math.min(99, Number(e.turnNumber || 0))),
+        timestamp: String(e.timestamp || new Date().toISOString()).slice(0, 32),
+      };
+    });
+    await db
+      .insert(matchHistory)
+      .values({
+        historyId,
+        playerId,
+        opponentPlayerId: h.oppPlayerId ? Number(h.oppPlayerId) : null,
+        opponentName: String(h.oppName || "Rival").slice(0, 24),
+        opponentAvatar: normalizeAvatar(h.oppAvatar),
+        myAvatar: normalizeAvatar(h.myAvatar),
+        mode: String(h.mode || fallback.mode).slice(0, 20),
+        result: fallback.won ? "win" : "loss",
+        mySecret: isValidSecretCode(String(h.mySecret || "")) ? String(h.mySecret) : "",
+        oppSecret: isValidSecretCode(String(h.oppSecret || "")) ? String(h.oppSecret) : "",
+        guesses,
+        endReason: h.endReason ? String(h.endReason).slice(0, 20) : null,
+        turnsTaken: fallback.turnsTaken,
+      })
+      .onConflictDoNothing();
+  } catch {
+    /* history is best-effort */
+  }
+}
+
 async function findByUsername(name: string): Promise<PlayerRow | null> {
   const exact = await db.select().from(players).where(eq(players.username, name)).limit(1);
   if (exact[0]) return exact[0];
@@ -123,6 +213,9 @@ function guestProfile(name: string) {
     claimedDailyQuests: [] as string[],
     dailyStats: emptyDailyStats(new Date().toISOString().slice(0, 10)),
     dailyChallengeDone: null,
+    dailyCodeDone: null,
+    seasonId: "",
+    seasonPeakTrophies: 0,
     coins: 250,
     gems: 20,
     streakDays: 1,
@@ -149,13 +242,16 @@ export async function GET(req: NextRequest) {
 
     let currentPlayer: ReturnType<typeof publicPlayer> | null = null;
     let streakInfo: object | null = null;
+    let season: object | null = null;
 
     if (playerId) {
       const [row] = await db.select().from(players).where(eq(players.id, playerId)).limit(1);
       if (row) {
         const res = await applyStreak(row, Number.isFinite(tzEast) ? tzEast : 0);
         streakInfo = res.streakInfo;
-        currentPlayer = publicPlayer(res.player);
+        const sRes = await applySeason(res.player);
+        season = sRes.season;
+        currentPlayer = publicPlayer(sRes.player);
         // Presence heartbeat is owned by the client's POST "heartbeat" action,
         // so GET stays read-only and single-flight (no racing writes).
       }
@@ -178,7 +274,7 @@ export async function GET(req: NextRequest) {
       isOnline: p.isOnline && now - new Date(p.lastSeenAt).getTime() < 3 * 60 * 1000,
     }));
 
-    return NextResponse.json({ currentPlayer, leaderboard, streakInfo });
+    return NextResponse.json({ currentPlayer, leaderboard, streakInfo, season });
   } catch (error) {
     console.error("GET /api/state error:", error);
     return NextResponse.json({ error: "Failed to load game state" }, { status: 500 });
@@ -279,6 +375,85 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ player: publicPlayer(res.player), token: issueToken(existing.id), streakInfo: res.streakInfo });
     }
 
+    /* ------------------------- public profile ------------------------- */
+    if (action === "get_public_profile") {
+      const targetId = Number(body.targetId || 0);
+      const [target] = await db.select().from(players).where(eq(players.id, targetId)).limit(1);
+      if (!target) return NextResponse.json({ error: "Player not found" }, { status: 404 });
+      const requesterId = verifyToken(body.token || req.headers.get("authorization")?.replace("Bearer ", ""));
+
+      const [{ c: followersC }] = await db.select({ c: sql<number>`count(*)::int` }).from(follows).where(eq(follows.followingId, targetId));
+      const [{ c: followingC }] = await db.select({ c: sql<number>`count(*)::int` }).from(follows).where(eq(follows.followerId, targetId));
+
+      let isFollowing = false;
+      let followsMe = false;
+      let h2h: { wins: number; losses: number } | null = null;
+      if (requesterId && requesterId !== targetId) {
+        const rel = await db
+          .select()
+          .from(follows)
+          .where(
+            or(
+              and(eq(follows.followerId, requesterId), eq(follows.followingId, targetId)),
+              and(eq(follows.followerId, targetId), eq(follows.followingId, requesterId))
+            )
+          );
+        isFollowing = rel.some((r) => r.followerId === requesterId);
+        followsMe = rel.some((r) => r.followerId === targetId);
+        const mine = await db
+          .select()
+          .from(matchHistory)
+          .where(and(eq(matchHistory.playerId, requesterId), eq(matchHistory.opponentPlayerId, targetId)))
+          .limit(200);
+        if (mine.length) {
+          h2h = {
+            wins: mine.filter((m) => m.result === "win").length,
+            losses: mine.filter((m) => m.result === "loss").length,
+          };
+        }
+      }
+
+      let inMatchRoom: string | null = null;
+      const liveMatches = await db
+        .select()
+        .from(matches)
+        .where(and(inArray(matches.status, ["playing", "setup"]), or(eq(matches.player1Id, targetId), eq(matches.player2Id, targetId))))
+        .orderBy(desc(matches.createdAt))
+        .limit(3);
+      for (const m of liveMatches) {
+        const seen = m.player1Id === targetId ? m.p1SeenAt : m.p2SeenAt;
+        if (seen && Date.now() - new Date(seen).getTime() < 90_000) { inMatchRoom = m.roomCode; break; }
+      }
+
+      return NextResponse.json({
+        profile: {
+          id: target.id,
+          username: target.username,
+          avatarConfig: normalizeAvatar(target.avatarConfig),
+          frameId: target.frameId,
+          themeId: target.themeId,
+          title: target.title,
+          division: target.division,
+          trophies: target.trophies,
+          level: target.level,
+          wins: target.wins,
+          losses: target.losses,
+          totalGames: target.totalGames,
+          fastestWinTurns: target.fastestWinTurns,
+          streakDays: target.streakDays,
+          isOnline: target.isOnline && Date.now() - new Date(target.lastSeenAt).getTime() < 100_000,
+          inMatchRoom,
+          createdAt: new Date(target.createdAt).toISOString(),
+          followers: Number(followersC) || 0,
+          following: Number(followingC) || 0,
+          isFollowing,
+          followsMe,
+          achievements: Array.isArray(target.completedAchievements) ? target.completedAchievements : [],
+          h2h,
+        },
+      });
+    }
+
     /* ---------------------- everything below needs auth ---------------------- */
     const playerId = verifyToken(body.token || req.headers.get("authorization")?.replace("Bearer ", ""));
     if (!playerId) {
@@ -302,6 +477,69 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ player: publicPlayer(updated), granted: grant });
     }
 
+    if (action === "list_history") {
+      const rows = await db
+        .select()
+        .from(matchHistory)
+        .where(eq(matchHistory.playerId, player.id))
+        .orderBy(desc(matchHistory.createdAt))
+        .limit(20);
+      return NextResponse.json({
+        history: rows.map((r) => ({
+          historyId: r.historyId,
+          mode: r.mode,
+          result: r.result,
+          myName: player.username,
+          myAvatar: normalizeAvatar(r.myAvatar),
+          oppName: r.opponentName,
+          oppAvatar: normalizeAvatar(r.opponentAvatar),
+          oppPlayerId: r.opponentPlayerId,
+          mySecret: r.mySecret,
+          oppSecret: r.oppSecret,
+          guesses: Array.isArray(r.guesses) ? r.guesses : [],
+          endReason: r.endReason,
+          turnsTaken: r.turnsTaken,
+          createdAt: new Date(r.createdAt).toISOString(),
+        })),
+      });
+    }
+
+    if (action === "record_daily_code") {
+      const resultId = String(body.resultId || "");
+      if (resultId) {
+        const inserted = await db.insert(resultLog).values({ resultId, playerId: player.id }).onConflictDoNothing().returning();
+        if (inserted.length === 0) return NextResponse.json({ player: publicPlayer(player), applied: false });
+      }
+      const today = localDateStr(Number.isFinite(tzEast) ? tzEast : 0);
+      if (player.dailyCodeDone === today) {
+        return NextResponse.json({ player: publicPlayer(player), applied: false });
+      }
+      const won = Boolean(body.won);
+      const guessesUsed = Math.max(1, Math.min(8, Number(body.guessesUsed || 8)));
+      const coins = won ? 50 + (8 - guessesUsed) * 10 : 10;
+      const xp = won ? 70 : 20;
+      const stats: DailyStats =
+        player.dailyStats && player.dailyStats.date === today ? { ...player.dailyStats } : emptyDailyStats(today);
+      stats.games += 1;
+      if (won) stats.wins += 1;
+      const newXp = player.xp + xp;
+      const [updated] = await db
+        .update(players)
+        .set({
+          coins: player.coins + coins,
+          xp: newXp,
+          level: Math.max(player.level, Math.floor(newXp / 200) + 1),
+          dailyCodeDone: today,
+          dailyStats: stats,
+          lastSeenAt: new Date(),
+          isOnline: true,
+        })
+        .where(eq(players.id, player.id))
+        .returning();
+      await saveHistory(player.id, body.history, { won, mode: "daily_code", turnsTaken: guessesUsed });
+      return NextResponse.json({ player: publicPlayer(updated), applied: true, coins });
+    }
+
     /* --------------------------- cosmetics --------------------------- */
     const applyEquip = (row: PlayerRow, itemId: string) => {
       const item = getShopItem(itemId);
@@ -312,6 +550,7 @@ export async function POST(req: NextRequest) {
         case "avatar_base": updates.avatarConfig = { ...avatar, base: item.meta }; break;
         case "avatar_color": updates.avatarConfig = { ...avatar, color: item.meta }; break;
         case "avatar_accessory": updates.avatarConfig = { ...avatar, accessory: item.meta }; break;
+        case "avatar_pattern": updates.avatarConfig = { ...avatar, pattern: item.meta }; break;
         case "frame": updates.frameId = item.id; break;
         case "theme": updates.themeId = item.id; break;
         case "effect": updates.effectId = item.id; break;
@@ -322,13 +561,19 @@ export async function POST(req: NextRequest) {
 
     if (action === "equip_cosmetic") {
       const itemId = String(body.itemId || "");
-      const owned = Array.isArray(player.ownedCosmetics) ? player.ownedCosmetics : [];
-      if (!owned.includes(itemId)) {
+      const owned = Array.isArray(player.ownedCosmetics) ? [...player.ownedCosmetics] : [];
+      const item = getShopItem(itemId);
+      const isFree = !!item && !(item.priceCoins || 0) && !(item.priceGems || 0);
+      if (!owned.includes(itemId) && !isFree) {
         return NextResponse.json({ error: "You don't own this item yet." }, { status: 400 });
       }
       const updates = applyEquip(player, itemId);
       if (!updates) return NextResponse.json({ error: "Item not found" }, { status: 404 });
-      const [updated] = await db.update(players).set(updates).where(eq(players.id, player.id)).returning();
+      // Free items (e.g. "No Pattern") become owned on first equip.
+      if (isFree && !owned.includes(itemId)) {
+        (updates as Record<string, unknown>).ownedCosmetics = [...owned, itemId];
+      }
+      const [updated] = await db.update(players).set(updates as Partial<PlayerRow>).where(eq(players.id, player.id)).returning();
       return NextResponse.json({ player: publicPlayer(updated) });
     }
 
@@ -387,11 +632,12 @@ export async function POST(req: NextRequest) {
 
     /* ------------------------- match results ------------------------- */
     if (action === "record_match_result") {
+      const base = (await applySeason(player)).player;
       const resultId = String(body.resultId || "");
       if (resultId) {
         const inserted = await db
           .insert(resultLog)
-          .values({ resultId, playerId: player.id })
+          .values({ resultId, playerId: base.id })
           .onConflictDoNothing()
           .returning();
         if (inserted.length === 0) {
@@ -409,27 +655,27 @@ export async function POST(req: NextRequest) {
 
       const today = localDateStr(Number.isFinite(tzEast) ? tzEast : 0);
       const stats: DailyStats =
-        player.dailyStats && player.dailyStats.date === today ? { ...player.dailyStats } : emptyDailyStats(today);
+        base.dailyStats && base.dailyStats.date === today ? { ...base.dailyStats } : emptyDailyStats(today);
       stats.games += 1;
       stats.orders += ordersTotal;
       if (won) stats.wins += 1;
       if (won && turnsTaken <= 6) stats.fastWins += 1;
 
       let dailyBonus = 0;
-      let dailyDone = player.dailyChallengeDone;
+      let dailyDone = base.dailyChallengeDone;
       if (won && body.dailyChallengeId) {
         const dc = getDailyChallenge(new Date(Date.now() + (Number.isFinite(tzEast) ? tzEast : 0) * 60000));
-        if (body.dailyChallengeId === dc.id && player.dailyChallengeDone !== dc.dateKey) {
+        if (body.dailyChallengeId === dc.id && base.dailyChallengeDone !== dc.dateKey) {
           dailyBonus = Math.round(120 * dc.bonusMultiplier);
           dailyDone = dc.dateKey;
         }
       }
 
-      const newTrophies = Math.max(0, player.trophies + trophyDelta);
-      const newXp = player.xp + xpEarned;
-      const newWins = player.wins + (won ? 1 : 0);
+      const newTrophies = Math.max(0, base.trophies + trophyDelta);
+      const newXp = base.xp + xpEarned;
+      const newWins = base.wins + (won ? 1 : 0);
 
-      const achievements = Array.isArray(player.completedAchievements) ? [...player.completedAchievements] : [];
+      const achievements = Array.isArray(base.completedAchievements) ? [...base.completedAchievements] : [];
       const unlocked: string[] = [];
       let bonusGems = 0;
       const check = (cond: boolean, id: string) => {
@@ -460,22 +706,25 @@ export async function POST(req: NextRequest) {
           trophies: newTrophies,
           division: getDivisionForTrophies(newTrophies).name,
           xp: newXp,
-          level: Math.max(player.level, Math.floor(newXp / 200) + 1),
-          coins: player.coins + coinsEarned + dailyBonus,
-          gems: player.gems + bonusGems,
+          level: Math.max(base.level, Math.floor(newXp / 200) + 1),
+          coins: base.coins + coinsEarned + dailyBonus,
+          gems: base.gems + bonusGems,
           wins: newWins,
-          losses: player.losses + (won ? 0 : 1),
-          totalGames: player.totalGames + 1,
-          fastestWinTurns: won && (!player.fastestWinTurns || turnsTaken < player.fastestWinTurns) ? turnsTaken : player.fastestWinTurns,
+          losses: base.losses + (won ? 0 : 1),
+          totalGames: base.totalGames + 1,
+          fastestWinTurns: won && (!base.fastestWinTurns || turnsTaken < base.fastestWinTurns) ? turnsTaken : base.fastestWinTurns,
+          seasonPeakTrophies: Math.max(base.seasonPeakTrophies || 0, newTrophies),
+          seasonXp: (base.seasonXp || 0) + xpEarned,
           completedAchievements: achievements,
           dailyStats: stats,
           dailyChallengeDone: dailyDone,
           lastSeenAt: new Date(),
           isOnline: true,
         })
-        .where(eq(players.id, player.id))
+        .where(eq(players.id, base.id))
         .returning();
 
+      await saveHistory(base.id, body.history, { won, mode: String(body.mode || "ai"), turnsTaken });
       return NextResponse.json({ player: publicPlayer(updated), applied: true, unlocked, bonusGems, dailyBonus });
     }
 

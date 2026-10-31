@@ -1,6 +1,6 @@
 /* Cipher Clash service worker — network-first for pages & APIs,
    cache-first for static assets. Bump VERSION to ship updates. */
-const VERSION = "cipher-clash-v3";
+const VERSION = "cipher-clash-v4";
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 
@@ -75,5 +75,44 @@ self.addEventListener("fetch", (event) => {
         return res;
       })
       .catch(() => caches.match(request).then((r) => r || caches.match("/")))
+  );
+});
+
+/* --------------------------- push notifications --------------------------- */
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : "" };
+  }
+  const title = data.title || "Cipher Clash";
+  const options = {
+    body: data.body || "Something happened in Cipher Clash!",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    tag: data.tag || "cipher-clash",
+    data: { url: data.url || "/" },
+    vibrate: [120, 60, 120],
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clients) => {
+        for (const client of clients) {
+          if (client.url.includes(self.location.origin) && "focus" in client) {
+            client.postMessage({ type: "notification-click", url });
+            return client.focus();
+          }
+        }
+        return self.clients.openWindow(url);
+      })
   );
 });

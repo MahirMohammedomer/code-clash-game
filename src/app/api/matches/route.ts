@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { matches, MatchGuessEntry } from "@/db/schema";
 import { ensureDatabaseReady } from "@/db/seed";
 import { eq, and, desc, isNull, gt } from "drizzle-orm";
-import { evaluateGuess, isValidSecretCode } from "@/lib/game-engine";
+import { evaluateGuess, isValidSecretCode, generateRandomCode } from "@/lib/game-engine";
 import { normalizeAvatar, DEFAULT_AVATAR } from "@/lib/avatar";
 import { randomToken } from "@/lib/auth-server";
 import { sanitizeText } from "@/lib/security";
@@ -45,7 +45,12 @@ function safeMatch(m: MatchRow, viewerSlot?: 1 | 2) {
     hasPlayer2: Boolean(m.p2Token),
     currentTurn: (m.currentTurn === 2 ? 2 : 1) as 1 | 2,
     turnStartedAt: new Date(m.turnStartedAt).toISOString(),
-    guesses: Array.isArray(m.guesses) ? m.guesses : [],
+    guesses: (Array.isArray(m.guesses) ? m.guesses : []).map((g) =>
+      // Race fairness: nobody sees rival digits until the race ends.
+      m.mode === "online_race" && m.status !== "finished" && (!viewerSlot || g.playerSlot !== viewerSlot)
+        ? { ...g, guess: "????" }
+        : g
+    ),
     winnerSlot: m.winnerSlot,
     winnerName: m.winnerName,
     endReason: m.endReason,
@@ -53,6 +58,9 @@ function safeMatch(m: MatchRow, viewerSlot?: 1 | 2) {
     p2SeenAt: m.p2SeenAt ? new Date(m.p2SeenAt).toISOString() : null,
     yourSecret:
       viewerSlot === 1 ? m.player1Secret || "" : viewerSlot === 2 ? m.player2Secret || "" : undefined,
+    secret1: m.status === "finished" ? m.player1Secret || "" : undefined,
+    secret2: m.status === "finished" ? m.player2Secret || "" : undefined,
+    raceCode: m.status === "finished" ? m.raceCode || undefined : undefined,
     serverNow: new Date().toISOString(),
     createdAt: new Date(m.createdAt).toISOString(),
   };
@@ -137,6 +145,8 @@ export async function POST(req: NextRequest) {
       const playerId = body.playerId ? Number(body.playerId) : null;
       const secret = isValidSecretCode(body.secret || "") ? body.secret : "";
       const timerSeconds = [15, 30, 45, 60, 90].includes(Number(body.timerSeconds)) ? Number(body.timerSeconds) : 45;
+      const raceMode = body.mode === "race";
+      const matchMode = raceMode ? "online_race" : "online_1v1";
 
       // Quick match: first try to claim an open public room as Player 2.
       if (action === "quick_match") {
@@ -148,6 +158,7 @@ export async function POST(req: NextRequest) {
             and(
               eq(matches.status, "waiting"),
               eq(matches.isPrivate, false),
+              eq(matches.mode, matchMode),
               isNull(matches.p2Token),
               gt(matches.createdAt, cutoff)
             )
@@ -160,7 +171,7 @@ export async function POST(req: NextRequest) {
           if (room.player1Id && playerId && room.player1Id === playerId) continue;
           if (room.p1SeenAt && Date.now() - new Date(room.p1SeenAt).getTime() > 30000) continue;
           const token = randomToken(20);
-          const status = isValidSecretCode(room.player1Secret || "") && isValidSecretCode(secret) ? "playing" : "setup";
+          const status = raceMode ? "playing" : isValidSecretCode(room.player1Secret || "") && isValidSecretCode(secret) ? "playing" : "setup";
           const claimed = await db
             .update(matches)
             .set({
@@ -195,7 +206,8 @@ export async function POST(req: NextRequest) {
             .insert(matches)
             .values({
               roomCode,
-              mode: "online_1v1",
+              mode: matchMode,
+              raceCode: raceMode ? generateRandomCode() : null,
               status: "waiting",
               timerSeconds,
               isPrivate,
@@ -205,7 +217,7 @@ export async function POST(req: NextRequest) {
               player1AvatarConfig: avatar,
               player1Frame: frame,
               player1Division: division,
-              player1Secret: secret,
+              player1Secret: raceMode ? "" : secret,
               p1Token: token,
               p1SeenAt: new Date(),
               player2Name: "Waiting for rival...",
@@ -247,7 +259,7 @@ export async function POST(req: NextRequest) {
       const avatar = normalizeAvatar(body.avatar);
       const secret = isValidSecretCode(body.secret || "") ? body.secret : "";
       const token = randomToken(20);
-      const status = isValidSecretCode(m.player1Secret || "") && isValidSecretCode(secret) ? "playing" : "setup";
+      const status = m.mode === "online_race" ? "playing" : isValidSecretCode(m.player1Secret || "") && isValidSecretCode(secret) ? "playing" : "setup";
 
       const claimed = await db
         .update(matches)
@@ -281,6 +293,7 @@ export async function POST(req: NextRequest) {
 
     /* ---------------------------- set secret ---------------------------- */
     if (action === "set_secret") {
+      if (m.mode === "online_race") return NextResponse.json({ match: safeMatch(m, slot) });
       const secret = String(body.secret || "");
       if (!isValidSecretCode(secret)) {
         return NextResponse.json({ error: "Secret must be 4 unique digits from 1-9." }, { status: 400 });
@@ -316,6 +329,70 @@ export async function POST(req: NextRequest) {
       const guessId = String(body.guessId || "");
       if (guessId && guesses.some((g) => g.id === guessId)) {
         return NextResponse.json({ match: safeMatch(m, slot), duplicate: true });
+      }
+
+      /* --------------------------- race mode --------------------------- */
+      if (m.mode === "online_race") {
+        if (body.isTimeout) return NextResponse.json({ match: safeMatch(m, slot) });
+        const raceGuess = String(body.guess || "");
+        if (!isValidSecretCode(raceGuess)) {
+          return NextResponse.json({ error: "Guess must be 4 unique digits from 1-9." }, { status: 400 });
+        }
+        const RACE_CAP = 15;
+        const mine = guesses.filter((g) => g.playerSlot === slot);
+        if (mine.length >= RACE_CAP) {
+          return NextResponse.json({ error: "You're out of guesses!", match: safeMatch(m, slot) }, { status: 400 });
+        }
+        const lastMine = mine[mine.length - 1];
+        if (lastMine && Date.now() - new Date(lastMine.timestamp).getTime() < 600) {
+          return NextResponse.json({ error: "Too fast — breathe!", match: safeMatch(m, slot) }, { status: 429 });
+        }
+        const raceRes = evaluateGuess(m.raceCode || "", raceGuess);
+        const raceEntry: MatchGuessEntry = {
+          id: guessId || `g-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          playerSlot: slot,
+          playerName: slot === 1 ? m.player1Name : m.player2Name,
+          guess: raceGuess,
+          points: raceRes.points,
+          orders: raceRes.orders,
+          isTimeout: false,
+          turnNumber: mine.length + 1,
+          timestamp: new Date().toISOString(),
+        };
+        guesses.push(raceEntry);
+
+        let rStatus = m.status;
+        let rWinnerSlot = m.winnerSlot;
+        let rWinnerName = m.winnerName;
+        let rEndReason = m.endReason;
+        if (raceRes.isWin) {
+          rStatus = "finished";
+          rWinnerSlot = slot;
+          rWinnerName = raceEntry.playerName;
+          rEndReason = "raced";
+        } else {
+          const c1 = guesses.filter((g) => g.playerSlot === 1).length;
+          const c2 = guesses.filter((g) => g.playerSlot === 2).length;
+          if (c1 >= RACE_CAP && c2 >= RACE_CAP) {
+            const bestScore = (sl: 1 | 2) => guesses.filter((g) => g.playerSlot === sl).reduce((mx, g) => Math.max(mx, g.orders * 10 + g.points), 0);
+            const b1 = bestScore(1);
+            const b2 = bestScore(2);
+            rStatus = "finished";
+            rEndReason = b1 === b2 ? "race_draw" : "raced";
+            rWinnerSlot = b1 === b2 ? null : b1 > b2 ? 1 : 2;
+            rWinnerName = rWinnerSlot === 1 ? m.player1Name : rWinnerSlot === 2 ? m.player2Name : null;
+          }
+        }
+        const [raceUpdated] = await db
+          .update(matches)
+          .set({ guesses, status: rStatus, winnerSlot: rWinnerSlot, winnerName: rWinnerName, endReason: rEndReason, version: m.version + 1 })
+          .where(and(eq(matches.id, m.id), eq(matches.version, m.version)))
+          .returning();
+        if (!raceUpdated) {
+          const fresh = await getByCode(code);
+          return NextResponse.json({ match: fresh ? safeMatch(fresh, slot) : safeMatch(m, slot) });
+        }
+        return NextResponse.json({ match: safeMatch(raceUpdated, slot) });
       }
 
       const currentSlot: 1 | 2 = m.currentTurn === 2 ? 2 : 1;

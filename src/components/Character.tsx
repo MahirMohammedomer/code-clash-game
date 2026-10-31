@@ -103,7 +103,7 @@ function Eyes({ mood, base }: { mood: Mood; base: string }) {
 function Mouth({ mood, base }: { mood: Mood; base: string }) {
   const cx = 100, cy = 122;
 
-  if (base === "owl" || base === "chick") {
+  if (base === "owl" || base === "chick" || base === "penguin") {
     const open = mood === "happy" || mood === "win" || mood === "shocked";
     return (
       <g>
@@ -245,6 +245,111 @@ function BaseDecor({ base, body, belly, accent }: { base: string; body: string; 
           <rect x="52" y="62" width="96" height="78" rx="18" fill="#1E2235" />
         </g>
       );
+    case "penguin":
+      return (
+        <g>
+          <ellipse cx="28" cy="124" rx="11" ry="24" fill={accent} transform="rotate(24 28 124)" />
+          <ellipse cx="172" cy="124" rx="11" ry="24" fill={accent} transform="rotate(-24 172 124)" />
+          <ellipse cx="100" cy="108" rx="47" ry="50" fill="#FFFFFF" opacity="0.96" />
+          <g stroke={accent} strokeWidth="5" strokeLinecap="round" fill="none">
+            <path d="M96 30 Q94 18 86 14" />
+            <path d="M104 30 Q106 18 114 14" />
+          </g>
+        </g>
+      );
+    case "bunny":
+      return (
+        <g>
+          <ellipse cx="66" cy="0" rx="13" ry="37" fill={body} stroke={accent} strokeWidth="4" transform="rotate(-9 66 0)" />
+          <ellipse cx="66" cy="4" rx="6.5" ry="25" fill="#FFB3C8" transform="rotate(-9 66 4)" />
+          <ellipse cx="134" cy="0" rx="13" ry="37" fill={body} stroke={accent} strokeWidth="4" transform="rotate(9 134 0)" />
+          <ellipse cx="134" cy="4" rx="6.5" ry="25" fill="#FFB3C8" transform="rotate(9 134 4)" />
+          <ellipse cx="100" cy="112" rx="5.5" ry="4" fill="#FF6B9D" />
+          <rect x="93.5" y="126" width="13" height="12" rx="3.5" fill="#FFFFFF" stroke="#D8DEE9" strokeWidth="2" />
+          <path d="M100 127 L100 137" stroke="#D8DEE9" strokeWidth="2" />
+          <g fill={accent} opacity="0.55">
+            <circle cx="58" cy="110" r="1.8" /><circle cx="52" cy="116" r="1.8" /><circle cx="60" cy="118" r="1.8" />
+            <circle cx="142" cy="110" r="1.8" /><circle cx="148" cy="116" r="1.8" /><circle cx="140" cy="118" r="1.8" />
+          </g>
+        </g>
+      );
+    case "bear":
+      return (
+        <g>
+          <circle cx="48" cy="40" r="18" fill={body} stroke={accent} strokeWidth="4" />
+          <circle cx="48" cy="40" r="9" fill={belly} />
+          <circle cx="152" cy="40" r="18" fill={body} stroke={accent} strokeWidth="4" />
+          <circle cx="152" cy="40" r="9" fill={belly} />
+          <ellipse cx="100" cy="126" rx="27" ry="19" fill={belly} />
+          <ellipse cx="100" cy="115" rx="9.5" ry="6.5" fill="#26283B" />
+          <ellipse cx="97" cy="112.5" rx="3" ry="2" fill="#FFFFFF" opacity="0.7" />
+        </g>
+      );
+    case "monkey":
+      return (
+        <g>
+          <circle cx="28" cy="94" r="15" fill={body} stroke={accent} strokeWidth="4" />
+          <circle cx="28" cy="94" r="8" fill={belly} />
+          <circle cx="172" cy="94" r="15" fill={body} stroke={accent} strokeWidth="4" />
+          <circle cx="172" cy="94" r="8" fill={belly} />
+          <ellipse cx="100" cy="104" rx="47" ry="41" fill={belly} />
+          <path d="M86 32 Q98 16 112 28" stroke={accent} strokeWidth="6" strokeLinecap="round" fill="none" />
+          <circle cx="94" cy="116" r="2.6" fill="#26283B" opacity="0.65" />
+          <circle cx="106" cy="116" r="2.6" fill="#26283B" opacity="0.65" />
+        </g>
+      );
+    case "tiger":
+      return (
+        <g>
+          <circle cx="50" cy="42" r="15" fill={body} stroke={accent} strokeWidth="4" />
+          <circle cx="50" cy="42" r="7" fill="#FFB3C8" />
+          <circle cx="150" cy="42" r="15" fill={body} stroke={accent} strokeWidth="4" />
+          <circle cx="150" cy="42" r="7" fill="#FFB3C8" />
+          <g stroke={accent} strokeWidth="5" strokeLinecap="round" fill="none">
+            <path d="M82 32 Q84 42 83 50" />
+            <path d="M100 28 Q101 40 100 50" />
+            <path d="M118 32 Q116 42 117 50" />
+            <path d="M36 98 L50 103 M38 114 L51 115" />
+            <path d="M164 98 L150 103 M162 114 L149 115" />
+          </g>
+          <ellipse cx="100" cy="127" rx="25" ry="17" fill={belly} />
+          <ellipse cx="100" cy="116" rx="8" ry="5.5" fill="#C2431B" />
+        </g>
+      );
+    case "koala":
+      return (
+        <g>
+          <circle cx="30" cy="72" r="21" fill={accent} />
+          <circle cx="30" cy="72" r="12" fill="#FFFFFF" opacity="0.85" />
+          <circle cx="170" cy="72" r="21" fill={accent} />
+          <circle cx="170" cy="72" r="12" fill="#FFFFFF" opacity="0.85" />
+          <ellipse cx="100" cy="112" rx="13" ry="17" fill="#3A3F5C" />
+          <ellipse cx="95" cy="104" rx="4" ry="6" fill="#FFFFFF" opacity="0.35" />
+        </g>
+      );
+    case "wolf":
+      return (
+        <g>
+          <path d="M48 50 L36 2 L86 26 Z" fill={body} stroke={accent} strokeWidth="5" strokeLinejoin="round" />
+          <path d="M152 50 L164 2 L114 26 Z" fill={body} stroke={accent} strokeWidth="5" strokeLinejoin="round" />
+          <path d="M50 38 L44 15 L69 29 Z" fill="#E4EAF3" />
+          <path d="M150 38 L156 15 L131 29 Z" fill="#E4EAF3" />
+          <path d="M36 106 l15 9 -13 5 14 8 -18 2 z" fill={body} />
+          <path d="M164 106 l-15 9 13 5 -14 8 18 2 z" fill={body} />
+          <path d="M88 30 l6 -11 6 9 6 -9 6 11 z" fill={accent} />
+          <ellipse cx="100" cy="128" rx="32" ry="22" fill={belly} />
+          <ellipse cx="100" cy="114" rx="9" ry="6.5" fill="#26283B" />
+        </g>
+      );
+    case "ghost":
+      return (
+        <g>
+          <ellipse cx="25" cy="118" rx="10" ry="17" fill={body} stroke={accent} strokeWidth="4" transform="rotate(26 25 118)" />
+          <ellipse cx="175" cy="118" rx="10" ry="17" fill={body} stroke={accent} strokeWidth="4" transform="rotate(-26 175 118)" />
+          <path d="M42 44 l2.2 5.8 5.8 2.2 -5.8 2.2 -2.2 5.8 -2.2 -5.8 -5.8 -2.2 5.8 -2.2 Z" fill={belly} />
+          <path d="M160 34 l1.8 4.6 4.6 1.8 -4.6 1.8 -1.8 4.6 -1.8 -4.6 -4.6 -1.8 4.6 -1.8 Z" fill={belly} />
+        </g>
+      );
     default:
       return null;
   }
@@ -329,6 +434,109 @@ function Accessory({ id, accent }: { id: string; accent: string }) {
       );
     case "halo":
       return <ellipse cx="100" cy="2" rx="34" ry="10" fill="none" stroke="#FFD93D" strokeWidth="7" opacity="0.95" />;
+    case "flower":
+      return (
+        <g transform="translate(140 36)">
+          <g fill="#FF86D0">
+            <circle cx="0" cy="-11" r="7.5" /><circle cx="10.5" cy="-3.5" r="7.5" /><circle cx="6.5" cy="9" r="7.5" />
+            <circle cx="-6.5" cy="9" r="7.5" /><circle cx="-10.5" cy="-3.5" r="7.5" />
+          </g>
+          <circle cx="0" cy="0" r="6" fill="#FFD93D" />
+          <path d="M8 10 Q20 12 22 22 Q12 22 8 14 Z" fill="#58CC02" />
+        </g>
+      );
+    case "beanie":
+      return (
+        <g>
+          <path d="M52 48 Q100 -10 148 48 L148 52 L52 52 Z" fill="#FF4B6E" />
+          <path d="M70 22 Q100 6 130 22" stroke="#FFFFFF" strokeWidth="6" fill="none" opacity="0.55" strokeLinecap="round" />
+          <rect x="45" y="44" width="110" height="15" rx="7.5" fill="#E23D5C" />
+          <circle cx="100" cy="0" r="10" fill="#FFFFFF" />
+        </g>
+      );
+    case "bandana":
+      return (
+        <g>
+          <path d="M150 62 Q176 66 182 88 M148 70 Q168 80 168 100" stroke="#E23D3D" strokeWidth="8" fill="none" strokeLinecap="round" />
+          <path d="M43 56 Q100 38 157 56 L157 74 Q100 56 43 74 Z" fill="#FF4B4B" />
+          <g fill="#FFFFFF" opacity="0.85">
+            <circle cx="70" cy="58" r="3" /><circle cx="100" cy="54" r="3" /><circle cx="130" cy="58" r="3" />
+          </g>
+        </g>
+      );
+    case "monocle":
+      return (
+        <g>
+          <circle cx="124" cy="94" r="22" fill="rgba(255,217,61,0.14)" stroke="#E0A800" strokeWidth="5" />
+          <path d="M140 110 Q154 138 142 166" stroke="#E0A800" strokeWidth="3" strokeDasharray="4 4" fill="none" strokeLinecap="round" />
+          <circle cx="142" cy="168" r="4" fill="#E0A800" />
+        </g>
+      );
+    default:
+      return null;
+  }
+}
+
+/* ------------------------------- patterns ------------------------------- */
+
+function starPath(cx: number, cy: number, r: number): string {
+  const pts: string[] = [];
+  for (let i = 0; i < 10; i++) {
+    const rad = i % 2 === 0 ? r : r * 0.45;
+    const a = (Math.PI / 5) * i - Math.PI / 2;
+    pts.push(`${(cx + rad * Math.cos(a)).toFixed(1)} ${(cy + rad * Math.sin(a)).toFixed(1)}`);
+  }
+  return `M ${pts.join(" L ")} Z`;
+}
+
+function heartPath(cx: number, cy: number, s: number): string {
+  return `M ${cx} ${cy + s * 0.85} C ${cx - s * 1.3} ${cy - s * 0.1} ${cx - s * 0.7} ${cy - s * 1.05} ${cx} ${cy - s * 0.35} C ${cx + s * 0.7} ${cy - s * 1.05} ${cx + s * 1.3} ${cy - s * 0.1} ${cx} ${cy + s * 0.85} Z`;
+}
+
+function PatternOverlay({ pattern, belly, accent, clipId }: { pattern?: string; belly: string; accent: string; clipId: string }) {
+  if (!pattern || pattern === "none") return null;
+  const clip = `url(#${clipId})`;
+  switch (pattern) {
+    case "spots":
+      return (
+        <g clipPath={clip} fill={belly} opacity="0.5">
+          <circle cx="52" cy="58" r="7" /><circle cx="146" cy="52" r="9" /><circle cx="40" cy="140" r="10" />
+          <circle cx="160" cy="138" r="8" /><circle cx="66" cy="168" r="9" /><circle cx="136" cy="166" r="7" />
+          <circle cx="100" cy="40" r="6" />
+        </g>
+      );
+    case "stripes":
+      return (
+        <g clipPath={clip} opacity="0.32">
+          <g transform="rotate(-24 100 110)" fill={accent}>
+            <rect x="0" y="46" width="200" height="15" />
+            <rect x="0" y="82" width="200" height="15" />
+            <rect x="0" y="118" width="200" height="15" />
+            <rect x="0" y="154" width="200" height="15" />
+          </g>
+        </g>
+      );
+    case "grid":
+      return (
+        <g clipPath={clip} stroke={belly} strokeWidth="5" opacity="0.35">
+          <path d="M55 20 L55 185 M80 20 L80 185 M105 20 L105 185 M130 20 L130 185 M155 20 L155 185" />
+          <path d="M25 55 L175 55 M25 85 L175 85 M25 115 L175 115 M25 145 L175 145" />
+        </g>
+      );
+    case "stars":
+      return (
+        <g clipPath={clip} fill={belly} opacity="0.75">
+          <path d={starPath(56, 64, 8)} /><path d={starPath(148, 58, 9)} /><path d={starPath(44, 140, 8)} />
+          <path d={starPath(158, 132, 7)} /><path d={starPath(100, 164, 8)} />
+        </g>
+      );
+    case "hearts":
+      return (
+        <g clipPath={clip} fill={belly} opacity="0.8">
+          <path d={heartPath(54, 68, 9)} /><path d={heartPath(150, 82, 8)} /><path d={heartPath(100, 158, 10)} />
+          <path d={heartPath(146, 148, 7)} />
+        </g>
+      );
     default:
       return null;
   }
@@ -347,7 +555,7 @@ const MOOD_ANIM: Record<Mood, string> = {
   sleepy: "char-idle",
 };
 
-export function Character({
+export const Character = React.memo(function Character({
   config,
   mood = "idle",
   size = 120,
@@ -361,6 +569,11 @@ export function Character({
   const palette = getAvatarColor(config.color);
   const { base } = config;
   const isRobot = base === "robot";
+  const clipId = React.useId().replace(/[^a-zA-Z0-9]/g, "");
+  const bodyPath =
+    base === "ghost"
+      ? "M100 26 C147 26 170 66 170 112 C170 140 168 156 166 170 Q155 184 144 170 Q133 156 122 170 Q111 184 100 170 Q89 156 78 170 Q67 184 56 170 Q45 156 34 170 C32 156 30 140 30 112 C30 66 53 26 100 26 Z"
+      : "M100 26 C147 26 170 66 170 112 C170 156 141 180 100 180 C59 180 30 156 30 112 C30 66 53 26 100 26 Z";
 
   return (
     <svg
@@ -372,6 +585,11 @@ export function Character({
       aria-label="character"
       style={{ overflow: "visible" }}
     >
+      <defs>
+        <clipPath id={clipId}>
+          {isRobot ? <rect x="38" y="40" width="124" height="118" rx="30" /> : <path d={bodyPath} />}
+        </clipPath>
+      </defs>
       {/* shadow */}
       <ellipse cx="100" cy="184" rx="52" ry="9" fill="rgba(20,20,40,0.16)" className="char-shadow" />
       <g className="char-body-g">
@@ -380,14 +598,14 @@ export function Character({
           <rect x="38" y="40" width="124" height="118" rx="30" fill={palette.body} stroke={palette.accent} strokeWidth="5" />
         ) : (
           <path
-            d="M100 26 C147 26 170 66 170 112 C170 156 141 180 100 180 C59 180 30 156 30 112 C30 66 53 26 100 26 Z"
+            d={bodyPath}
             fill={palette.body}
             stroke={palette.accent}
             strokeWidth="5"
           />
         )}
         {/* belly */}
-        {!isRobot && base !== "dragon" && (
+        {!isRobot && base !== "dragon" && base !== "ghost" && (
           <ellipse cx="100" cy="146" rx="36" ry="28" fill={palette.belly} opacity="0.9" />
         )}
         {base === "dragon" && (
@@ -396,6 +614,8 @@ export function Character({
             <path d="M78 142 Q100 150 122 142 M80 156 Q100 164 120 156" stroke={palette.accent} strokeWidth="3" fill="none" opacity="0.5" />
           </g>
         )}
+
+        <PatternOverlay pattern={config.pattern} belly={palette.belly} accent={palette.accent} clipId={clipId} />
 
         <BaseDecor base={base} body={palette.body} belly={palette.belly} accent={palette.accent} />
 
@@ -431,11 +651,11 @@ export function Character({
       </g>
     </svg>
   );
-}
+});
 
 /* ------------------------- framed avatar (profile) ------------------------ */
 
-export function CharacterAvatar({
+export const CharacterAvatar = React.memo(function CharacterAvatar({
   config,
   frameId = "frame_emerald",
   mood = "idle",
@@ -469,7 +689,7 @@ export function CharacterAvatar({
       </div>
     </div>
   );
-}
+});
 
 /* ------------------------------ speech bubble ----------------------------- */
 
