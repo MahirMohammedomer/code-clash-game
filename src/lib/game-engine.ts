@@ -1,134 +1,54 @@
-export type AIDifficulty = "Rookie" | "Tactician" | "Mastermind" | "Oracle";
+import type { AvatarConfig } from "./avatar";
 
-export type TurnTimerOption = 15 | 30 | 45 | 60 | 90 | 0; // 0 = Unlimited
+export type AIDifficulty = "Rookie" | "Tactician" | "Mastermind" | "Oracle";
+export type TurnTimerOption = 15 | 30 | 45 | 60 | 90 | 0;
 
 export type DivisionName =
-  | "Bronze"
-  | "Silver"
-  | "Gold"
-  | "Platinum"
-  | "Diamond"
-  | "Master"
-  | "Grandmaster"
-  | "Legend";
+  | "Bronze" | "Silver" | "Gold" | "Platinum"
+  | "Diamond" | "Master" | "Grandmaster" | "Legend";
 
 export interface DivisionInfo {
   name: DivisionName;
   minTrophies: number;
   maxTrophies: number;
   color: string;
-  bgGradient: string;
-  borderColor: string;
-  badgeEmoji: string;
+  gradient: string; // css background for badges
   winRewardCoins: number;
 }
 
 export const DIVISIONS: DivisionInfo[] = [
-  {
-    name: "Bronze",
-    minTrophies: 0,
-    maxTrophies: 99,
-    color: "#CD7F32",
-    bgGradient: "from-amber-700 to-amber-900",
-    borderColor: "#9A5B1A",
-    badgeEmoji: "🥉",
-    winRewardCoins: 35,
-  },
-  {
-    name: "Silver",
-    minTrophies: 100,
-    maxTrophies: 249,
-    color: "#94A3B8",
-    bgGradient: "from-slate-400 to-slate-600",
-    borderColor: "#64748B",
-    badgeEmoji: "🥈",
-    winRewardCoins: 50,
-  },
-  {
-    name: "Gold",
-    minTrophies: 250,
-    maxTrophies: 449,
-    color: "#FFC800",
-    bgGradient: "from-yellow-400 to-amber-500",
-    borderColor: "#D97706",
-    badgeEmoji: "🥇",
-    winRewardCoins: 70,
-  },
-  {
-    name: "Platinum",
-    minTrophies: 450,
-    maxTrophies: 699,
-    color: "#06B6D4",
-    bgGradient: "from-cyan-400 to-teal-600",
-    borderColor: "#0891B2",
-    badgeEmoji: "💠",
-    winRewardCoins: 95,
-  },
-  {
-    name: "Diamond",
-    minTrophies: 700,
-    maxTrophies: 999,
-    color: "#1CB0F6",
-    bgGradient: "from-sky-400 to-blue-600",
-    borderColor: "#0284C7",
-    badgeEmoji: "💎",
-    winRewardCoins: 120,
-  },
-  {
-    name: "Master",
-    minTrophies: 1000,
-    maxTrophies: 1399,
-    color: "#CE82FF",
-    bgGradient: "from-purple-500 to-indigo-700",
-    borderColor: "#7E22CE",
-    badgeEmoji: "🔮",
-    winRewardCoins: 155,
-  },
-  {
-    name: "Grandmaster",
-    minTrophies: 1400,
-    maxTrophies: 1899,
-    color: "#FF4B4B",
-    bgGradient: "from-rose-500 to-red-700",
-    borderColor: "#BE123C",
-    badgeEmoji: "👑",
-    winRewardCoins: 200,
-  },
-  {
-    name: "Legend",
-    minTrophies: 1900,
-    maxTrophies: 99999,
-    color: "#58CC02",
-    bgGradient: "from-lime-400 via-emerald-500 to-teal-600",
-    borderColor: "#15803D",
-    badgeEmoji: "⚡",
-    winRewardCoins: 280,
-  },
+  { name: "Bronze", minTrophies: 0, maxTrophies: 99, color: "#B0703C", gradient: "linear-gradient(135deg,#D99A5B,#9A5B1A)", winRewardCoins: 35 },
+  { name: "Silver", minTrophies: 100, maxTrophies: 249, color: "#8A97AD", gradient: "linear-gradient(135deg,#C7D2E4,#7A8CA6)", winRewardCoins: 50 },
+  { name: "Gold", minTrophies: 250, maxTrophies: 449, color: "#E0A800", gradient: "linear-gradient(135deg,#FFD93D,#E0A800)", winRewardCoins: 70 },
+  { name: "Platinum", minTrophies: 450, maxTrophies: 699, color: "#0AA79A", gradient: "linear-gradient(135deg,#4FE3D0,#0E86C8)", winRewardCoins: 95 },
+  { name: "Diamond", minTrophies: 700, maxTrophies: 999, color: "#0284C7", gradient: "linear-gradient(135deg,#5CC8FF,#2456E6)", winRewardCoins: 120 },
+  { name: "Master", minTrophies: 1000, maxTrophies: 1399, color: "#7F3FD1", gradient: "linear-gradient(135deg,#C39BFF,#6D28D9)", winRewardCoins: 155 },
+  { name: "Grandmaster", minTrophies: 1400, maxTrophies: 1899, color: "#E23D3D", gradient: "linear-gradient(135deg,#FF7A7A,#C81E1E)", winRewardCoins: 200 },
+  { name: "Legend", minTrophies: 1900, maxTrophies: 99999, color: "#46A302", gradient: "linear-gradient(135deg,#A6F750,#0AA79A)", winRewardCoins: 280 },
 ];
 
 export function getDivisionForTrophies(trophies: number): DivisionInfo {
   const safe = Math.max(0, trophies);
   for (let i = DIVISIONS.length - 1; i >= 0; i--) {
-    if (safe >= DIVISIONS[i].minTrophies) {
-      return DIVISIONS[i];
-    }
+    if (safe >= DIVISIONS[i].minTrophies) return DIVISIONS[i];
   }
   return DIVISIONS[0];
 }
 
-/**
- * Validates that a code is strictly 4 unique digits from 1-9.
- */
+export function nextDivision(trophies: number): DivisionInfo | null {
+  const cur = getDivisionForTrophies(trophies);
+  const idx = DIVISIONS.findIndex((d) => d.name === cur.name);
+  return idx < DIVISIONS.length - 1 ? DIVISIONS[idx + 1] : null;
+}
+
+/* ------------------------------- Core rules ------------------------------ */
+
 export function isValidSecretCode(code: string): boolean {
   if (!code || code.length !== 4) return false;
   if (!/^[1-9]{4}$/.test(code)) return false;
-  const unique = new Set(code.split(""));
-  return unique.size === 4;
+  return new Set(code.split("")).size === 4;
 }
 
-/**
- * Generates a random valid 4-digit secret code using unique digits 1-9.
- */
 export function generateRandomCode(): string {
   const digits = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
   for (let i = digits.length - 1; i > 0; i--) {
@@ -138,12 +58,6 @@ export function generateRandomCode(): string {
   return digits.slice(0, 4).join("");
 }
 
-/**
- * Evaluates a 4-digit guess against a 4-digit secret code.
- * - Points: number of correct digits in ANY position (0-4)
- * - Orders: number of correct digits in the EXACT correct position (0-4)
- * First player to reach 4 Points + 4 Orders wins!
- */
 export function evaluateGuess(
   secret: string,
   guess: string
@@ -154,34 +68,19 @@ export function evaluateGuess(
   let points = 0;
   let orders = 0;
   const secretSet = new Set(secret.split(""));
-
   for (let i = 0; i < 4; i++) {
-    if (secretSet.has(guess[i])) {
-      points++;
-    }
-    if (secret[i] === guess[i]) {
-      orders++;
-    }
+    if (secretSet.has(guess[i])) points++;
+    if (secret[i] === guess[i]) orders++;
   }
-
-  return {
-    points,
-    orders,
-    isWin: points === 4 && orders === 4,
-  };
+  return { points, orders, isWin: orders === 4 };
 }
 
-let cachedAllPermutations: string[] | null = null;
-
-/**
- * Returns all 3,024 valid 4-digit codes (unique digits 1-9).
- */
+let cachedAll: string[] | null = null;
 export function getAllValidCodes(): string[] {
-  if (cachedAllPermutations) return cachedAllPermutations;
+  if (cachedAll) return cachedAll;
   const results: string[] = [];
   const digits = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
-
-  for (let a = 0; a < 9; a++) {
+  for (let a = 0; a < 9; a++)
     for (let b = 0; b < 9; b++) {
       if (b === a) continue;
       for (let c = 0; c < 9; c++) {
@@ -192,8 +91,7 @@ export function getAllValidCodes(): string[] {
         }
       }
     }
-  }
-  cachedAllPermutations = results;
+  cachedAll = results;
   return results;
 }
 
@@ -203,13 +101,6 @@ export interface PastGuessFeedback {
   orders: number;
 }
 
-/**
- * AI Solver for the 4 Difficulty Levels:
- * - Rookie: Random untried valid 4-digit code.
- * - Tactician: Eliminates digits from 0-point guesses and matches the last turn's Points count.
- * - Mastermind: Filters all 3,024 candidates for full consistency with all past guesses.
- * - Oracle: Full constraint solver + information-gain (entropy/minimax) selection so it solves rapidly (4-6 turns) while remaining fair and beatable.
- */
 export function computeAINextGuess(
   difficulty: AIDifficulty,
   aiPastGuesses: PastGuessFeedback[]
@@ -218,718 +109,379 @@ export function computeAINextGuess(
   const triedSet = new Set(aiPastGuesses.map((g) => g.guess));
   const validHistory = aiPastGuesses.filter((g) => isValidSecretCode(g.guess));
 
-  // First turn opening move
   if (validHistory.length === 0) {
-    const opener = generateRandomCode();
     return {
-      guess: opener,
+      guess: generateRandomCode(),
       candidateCount: 3024,
       thoughtText:
         difficulty === "Oracle"
           ? "Scanning 3,024 quantum permutations..."
           : difficulty === "Mastermind"
           ? "Deploying opening probe..."
-          : "Picking a lucky 4-digit starter!",
+          : "Picking a lucky starter!",
     };
   }
 
-  // 1. ROOKIE: Completely random untried code
   if (difficulty === "Rookie") {
     const untried = allCodes.filter((c) => !triedSet.has(c));
     const pick = untried[Math.floor(Math.random() * untried.length)] || generateRandomCode();
-    return {
-      guess: pick,
-      candidateCount: untried.length,
-      thoughtText: "Hmm, let me try these shiny numbers!",
-    };
+    return { guess: pick, candidateCount: untried.length, thoughtText: "Hmm, shiny numbers!" };
   }
 
-  // 2. TACTICIAN: Avoids digits from 0-point guesses and checks consistency with only the latest guess
   if (difficulty === "Tactician") {
-    const bannedDigits = new Set<string>();
-    for (const h of validHistory) {
-      if (h.points === 0) {
-        for (const ch of h.guess) bannedDigits.add(ch);
-      }
-    }
-    const last = validHistory[validHistory.length - 1];
+    // Sly deduces from Points across ALL past guesses (but ignores Orders),
+    // which makes him a real threat while staying clearly beatable.
     let pool = allCodes.filter((code) => {
       if (triedSet.has(code)) return false;
-      for (const ch of code) {
-        if (bannedDigits.has(ch)) return false;
+      for (const h of validHistory) {
+        if (evaluateGuess(code, h.guess).points !== h.points) return false;
       }
-      const ev = evaluateGuess(code, last.guess);
-      return ev.points === last.points;
+      return true;
     });
-
-    if (pool.length === 0) {
-      pool = allCodes.filter((c) => !triedSet.has(c));
+    if (pool.length === 0) pool = allCodes.filter((c) => !triedSet.has(c));
+    // Occasional fox blunder (~1 in 5 turns) gives the player breathing room.
+    if (Math.random() < 0.2 && pool.length > 3) {
+      const slipPool = allCodes.filter((c) => !triedSet.has(c));
+      const slip = slipPool[Math.floor(Math.random() * slipPool.length)];
+      return { guess: slip || pool[0], candidateCount: pool.length, thoughtText: "Just a hunch..." };
     }
     const pick = pool[Math.floor(Math.random() * pool.length)] || generateRandomCode();
-    return {
-      guess: pick,
-      candidateCount: pool.length,
-      thoughtText: `Narrowed down to ~${pool.length} tactical patterns!`,
-    };
+    return { guess: pick, candidateCount: pool.length, thoughtText: `~${pool.length} tactical patterns left` };
   }
 
-  // Full consistency filter for Mastermind & Oracle
-  let consistentPool = allCodes.filter((candidate) => {
+  let consistent = allCodes.filter((candidate) => {
     if (triedSet.has(candidate)) return false;
     for (const h of validHistory) {
       const ev = evaluateGuess(candidate, h.guess);
-      if (ev.points !== h.points || ev.orders !== h.orders) {
-        return false;
-      }
+      if (ev.points !== h.points || ev.orders !== h.orders) return false;
     }
     return true;
   });
+  if (consistent.length === 0) consistent = allCodes.filter((c) => !triedSet.has(c));
 
-  if (consistentPool.length === 0) {
-    consistentPool = allCodes.filter((c) => !triedSet.has(c));
-  }
-
-  // 3. MASTERMIND: Picks randomly from strictly consistent candidates (with slight noise on turn 2)
   if (difficulty === "Mastermind") {
-    if (validHistory.length === 1 && consistentPool.length > 20) {
-      // Second probe tries to test unprobed digits while staying consistent
-      const firstDigits = new Set(validHistory[0].guess.split(""));
-      const diverse = consistentPool.filter((c) => {
-        let overlap = 0;
-        for (const ch of c) if (firstDigits.has(ch)) overlap++;
-        return overlap === validHistory[0].points;
-      });
-      if (diverse.length > 0) consistentPool = diverse;
-    }
-    const pick =
-      consistentPool[Math.floor(Math.random() * consistentPool.length)] ||
-      generateRandomCode();
-    return {
-      guess: pick,
-      candidateCount: consistentPool.length,
-      thoughtText: `${consistentPool.length} viable codes remain in matrix.`,
-    };
+    const pick = consistent[Math.floor(Math.random() * consistent.length)] || generateRandomCode();
+    return { guess: pick, candidateCount: consistent.length, thoughtText: `${consistent.length} viable codes remain` };
   }
 
-  // 4. ORACLE: Information-gain entropy scoring over consistent candidates
-  if (consistentPool.length === 1) {
-    return {
-      guess: consistentPool[0],
-      candidateCount: 1,
-      thoughtText: "Target lock acquired. 1 possibility left!",
-    };
+  // Oracle — entropy maximization over a sample of consistent candidates
+  if (consistent.length === 1) {
+    return { guess: consistent[0], candidateCount: 1, thoughtText: "Target lock acquired!" };
   }
-
-  // Sample up to 65 candidates from consistentPool to evaluate partition entropy quickly
-  const sampleSize = Math.min(consistentPool.length, 65);
-  const step = Math.max(1, Math.floor(consistentPool.length / sampleSize));
-  const sampledCandidates: string[] = [];
-  for (let i = 0; i < consistentPool.length && sampledCandidates.length < sampleSize; i += step) {
-    sampledCandidates.push(consistentPool[i]);
-  }
-
-  let bestCandidate = sampledCandidates[0];
+  const sampleSize = Math.min(consistent.length, 65);
+  const step = Math.max(1, Math.floor(consistent.length / sampleSize));
+  const sample: string[] = [];
+  for (let i = 0; i < consistent.length && sample.length < sampleSize; i += step) sample.push(consistent[i]);
+  let best = sample[0];
   let bestScore = -1;
-
-  for (const probe of sampledCandidates) {
+  for (const probe of sample) {
     const buckets = new Map<string, number>();
-    for (const target of sampledCandidates) {
+    for (const target of sample) {
       const ev = evaluateGuess(target, probe);
       const key = `${ev.points}-${ev.orders}`;
       buckets.set(key, (buckets.get(key) || 0) + 1);
     }
-    // Shannon entropy calculation: higher entropy = more balanced split of remaining possibilities
     let entropy = 0;
     for (const count of buckets.values()) {
-      const p = count / sampledCandidates.length;
+      const p = count / sample.length;
       entropy -= p * Math.log2(p);
     }
-    if (entropy > bestScore) {
-      bestScore = entropy;
-      bestCandidate = probe;
-    }
+    if (entropy > bestScore) { bestScore = entropy; best = probe; }
   }
-
-  // To keep Oracle beatable (yet thrillingly smart), on turn 2 we allow a 20% chance of picking a random consistent candidate
-  if (validHistory.length === 1 && Math.random() < 0.2 && consistentPool.length > 2) {
-    bestCandidate = consistentPool[Math.floor(Math.random() * consistentPool.length)];
+  if (validHistory.length === 1 && Math.random() < 0.2 && consistent.length > 2) {
+    best = consistent[Math.floor(Math.random() * consistent.length)];
   }
-
-  return {
-    guess: bestCandidate,
-    candidateCount: consistentPool.length,
-    thoughtText: `Oracle entropy lock: ${consistentPool.length} possibilities left.`,
-  };
+  return { guess: best, candidateCount: consistent.length, thoughtText: `Entropy lock: ${consistent.length} possibilities` };
 }
 
-export interface AIProfileConfig {
+/* --------------------------- Bot personalities --------------------------- */
+
+export type BotMood = "idle" | "think" | "happy" | "sad" | "shocked" | "win" | "lose" | "sleepy";
+
+export interface AIBotProfile {
   difficulty: AIDifficulty;
   name: string;
   title: string;
-  emoji: string;
   tagline: string;
-  color: string;
-  borderColor: string;
+  avatar: AvatarConfig;
+  frameId: string;
+  accent: string;
   rewardCoins: number;
   rewardXp: number;
   trophyDelta: number;
+  thinkMinMs: number;
+  thinkMaxMs: number;
+  lines: {
+    start: string[];
+    thinking: string[];
+    goodGuess: string[];   // bot scored 3-4 points
+    badGuess: string[];    // bot scored 0 points
+    playerClose: string[]; // player scored 3-4 points / high orders
+    playerBad: string[];   // player scored 0
+    botWin: string[];
+    botLose: string[];
+    playerTimeout: string[];
+  };
 }
 
-export const AI_PROFILES: Record<AIDifficulty, AIProfileConfig> = {
+export const AI_BOTS: Record<AIDifficulty, AIBotProfile> = {
   Rookie: {
     difficulty: "Rookie",
-    name: "Pip the Chick",
-    title: "Rookie Bot",
-    emoji: "🐣",
-    tagline: "Playful & impulsive. Great for warming up!",
-    color: "#58CC02",
-    borderColor: "#46A302",
-    rewardCoins: 45,
-    rewardXp: 50,
-    trophyDelta: 15,
+    name: "Pip",
+    title: "Rookie Chick",
+    tagline: "Playful & random. Perfect first rival!",
+    avatar: { base: "chick", color: "sunny", accessory: "party" },
+    frameId: "frame_emerald",
+    accent: "#58CC02",
+    rewardCoins: 45, rewardXp: 50, trophyDelta: 14,
+    thinkMinMs: 600, thinkMaxMs: 1100,
+    lines: {
+      start: ["Yay! Let's play! I hid 4 super-secret numbers!", "Peep peep! Bet you can't crack my code!"],
+      thinking: ["Hmm... eeny meeny...", "Ooh, shiny numbers!", "Let me think... snack first?"],
+      goodGuess: ["Whoa, I'm getting warmer!", "Hehe, I smell your code!"],
+      badGuess: ["Oopsie! None of those?", "Peck peck... nope!"],
+      playerClose: ["Eek! You're close!", "No no no, stay away from my code!"],
+      playerBad: ["Hehe, totally wrong!", "Peep! Zero! My code is safe!"],
+      botWin: ["I DID IT! Happy dance!", "Peep peep, champion!"],
+      botLose: ["You cracked it! Again again!", "Wow, you're smart! One more?"],
+      playerTimeout: ["Too slow! Peep peep!", "Tick tock, time's up!"],
+    },
   },
   Tactician: {
     difficulty: "Tactician",
-    name: "Sly Fox",
-    title: "Tactician Bot",
-    emoji: "🦊",
-    tagline: "Eliminates dead digits and tracks Points.",
-    color: "#1CB0F6",
-    borderColor: "#1899D6",
-    rewardCoins: 80,
-    rewardXp: 85,
-    trophyDelta: 25,
+    name: "Sly",
+    title: "Tactician Fox",
+    tagline: "Tracks your digits. Eliminates fast.",
+    avatar: { base: "fox", color: "lava", accessory: "shades" },
+    frameId: "frame_neon",
+    accent: "#FF7A18",
+    rewardCoins: 80, rewardXp: 85, trophyDelta: 22,
+    thinkMinMs: 800, thinkMaxMs: 1400,
+    lines: {
+      start: ["A new challenger. Let's see what you've got.", "My code? Buried deep. Good luck."],
+      thinking: ["Calculating your habits...", "Interesting pattern...", "Cross-referencing digits..."],
+      goodGuess: ["Your trail is getting warm...", "Three of your digits. Noted."],
+      badGuess: ["Eliminated. That's data too.", "A dead end — for now."],
+      playerClose: ["Hmph. Lucky hit.", "You won't keep that pace."],
+      playerBad: ["Wasted move, friend.", "Zero. How embarrassing."],
+      botWin: ["Outfoxed. As expected.", "Too easy. Come back sharper."],
+      botLose: ["...Impressive. You read me well.", "Defeated by a clever one. Rare."],
+      playerTimeout: ["Hesitation loses games.", "The clock is my ally."],
+    },
   },
   Mastermind: {
     difficulty: "Mastermind",
     name: "Professor Hoot",
-    title: "Mastermind Bot",
-    emoji: "🦉",
-    tagline: "Full logic solver. Every clue counts!",
-    color: "#CE82FF",
-    borderColor: "#A560E8",
-    rewardCoins: 130,
-    rewardXp: 140,
-    trophyDelta: 35,
+    title: "Mastermind Owl",
+    tagline: "Full logic solver. Every clue counts.",
+    avatar: { base: "owl", color: "midnight", accessory: "glasses" },
+    frameId: "frame_celestial",
+    accent: "#7B5CFF",
+    rewardCoins: 130, rewardXp: 140, trophyDelta: 30,
+    thinkMinMs: 1000, thinkMaxMs: 1700,
+    lines: {
+      start: ["Ah, a student of logic. Class is in session.", "Every code breaks. Even yours."],
+      thinking: ["Filtering possibilities...", "Deduction in progress...", "A fascinating puzzle..."],
+      goodGuess: ["The solution space narrows nicely.", "Precisely as predicted."],
+      badGuess: ["Fascinating. A full elimination.", "Even failures teach us."],
+      playerClose: ["A sharp student indeed...", "You learn quickly. Concerning."],
+      playerBad: ["Elementary mistake, I'm afraid.", "Study the clues, young one."],
+      botWin: ["Q.E.D. The code is cracked.", "Another successful lecture."],
+      botLose: ["Remarkable! You surpassed the master.", "I shall... revise my theorems."],
+      playerTimeout: ["Deep thought takes time — too much.", "Punctuality matters in logic."],
+    },
   },
   Oracle: {
     difficulty: "Oracle",
     name: "Aethelgard",
     title: "The Grand Oracle",
-    emoji: "🔮",
-    tagline: "Entropy-driven genius. Hard, thrilling & beatable!",
-    color: "#FF4B4B",
-    borderColor: "#EA2B2B",
-    rewardCoins: 220,
-    rewardXp: 250,
-    trophyDelta: 50,
+    tagline: "Sees every future. Nearly unbeatable.",
+    avatar: { base: "dragon", color: "cosmic", accessory: "wizard" },
+    frameId: "frame_volcanic",
+    accent: "#E85D04",
+    rewardCoins: 220, rewardXp: 250, trophyDelta: 42,
+    thinkMinMs: 1100, thinkMaxMs: 1900,
+    lines: {
+      start: ["I have foreseen this duel... and its end.", "Your code whispers to me already."],
+      thinking: ["Reading the threads of fate...", "3,024 futures... collapsing.", "The stars align..."],
+      goodGuess: ["The prophecy unfolds.", "Your digits reveal themselves."],
+      badGuess: ["A future erased. Good riddance.", "Even voids have meaning."],
+      playerClose: ["You disturb the timeline...", "Bold. The fates watch you."],
+      playerBad: ["The void answers your guess.", "Blindly you wander."],
+      botWin: ["As it was written. Victory.", "No mortal outruns destiny."],
+      botLose: ["IMPOSSIBLE... You rewrote fate itself!", "The prophecy... shattered. Well played, mortal."],
+      playerTimeout: ["Time devours the hesitant.", "Even eternity ran out for you."],
+    },
   },
 };
 
-export interface SeasonPassTier {
-  tier: number;
-  xpRequired: number;
-  freeReward: {
-    id: string;
-    name: string;
-    type: "coins" | "gems" | "frame" | "title" | "theme" | "effect";
-    icon: string;
-    amount?: number;
-  };
-  premiumReward: {
-    id: string;
-    name: string;
-    type: "coins" | "gems" | "frame" | "title" | "theme" | "effect";
-    icon: string;
-    amount?: number;
-  };
+export function pickLine(lines: string[]): string {
+  return lines[Math.floor(Math.random() * lines.length)];
 }
 
-export const SEASON_PASS_TIERS: SeasonPassTier[] = [
-  {
-    tier: 1,
-    xpRequired: 100,
-    freeReward: { id: "coins_100", name: "150 Clash Coins", type: "coins", icon: "🪙", amount: 150 },
-    premiumReward: { id: "frame_neon", name: "Cyber Neon Frame", type: "frame", icon: "⚡" },
-  },
-  {
-    tier: 2,
-    xpRequired: 300,
-    freeReward: { id: "title_sleuth", name: "Title: Digit Sleuth", type: "title", icon: "🕵️" },
-    premiumReward: { id: "gems_40", name: "40 Royal Gems", type: "gems", icon: "💎", amount: 40 },
-  },
-  {
-    tier: 3,
-    xpRequired: 600,
-    freeReward: { id: "frame_solar", name: "Solar Flare Frame", type: "frame", icon: "☀️" },
-    premiumReward: { id: "theme_cyber", name: "Cyber Arcade Theme", type: "theme", icon: "🕹️" },
-  },
-  {
-    tier: 4,
-    xpRequired: 1000,
-    freeReward: { id: "gems_25", name: "25 Royal Gems", type: "gems", icon: "💎", amount: 25 },
-    premiumReward: { id: "effect_lightning", name: "Thunder Strike Finish", type: "effect", icon: "🌩️" },
-  },
-  {
-    tier: 5,
-    xpRequired: 1500,
-    freeReward: { id: "coins_300", name: "300 Clash Coins", type: "coins", icon: "🪙", amount: 300 },
-    premiumReward: { id: "frame_dragon", name: "Dragonfire Aura Frame", type: "frame", icon: "🐉" },
-  },
-  {
-    tier: 6,
-    xpRequired: 2100,
-    freeReward: { id: "theme_royal", name: "Royal Velvet Theme", type: "theme", icon: "👑" },
-    premiumReward: { id: "title_oracle_slayer", name: "Title: Oracle Slayer", type: "title", icon: "🔮" },
-  },
-  {
-    tier: 7,
-    xpRequired: 2800,
-    freeReward: { id: "effect_stars", name: "Supernova Burst", type: "effect", icon: "🌟" },
-    premiumReward: { id: "frame_celestial", name: "Celestial Legend Frame", type: "frame", icon: "🌌" },
-  },
-];
+/* ------------------------------ Shop catalog ----------------------------- */
+
+export type CosmeticCategory =
+  | "avatar_base" | "avatar_color" | "avatar_accessory"
+  | "frame" | "theme" | "effect" | "title";
+
+export type Rarity = "common" | "rare" | "epic" | "legendary";
 
 export interface CosmeticItem {
   id: string;
   name: string;
-  category: "frame" | "theme" | "effect" | "title";
-  icon: string;
+  category: CosmeticCategory;
   description: string;
   priceCoins?: number;
   priceGems?: number;
-  previewStyle: string;
+  rarity: Rarity;
+  /** base/color/accessory/frame/theme/effect id, or title text */
+  meta: string;
 }
 
-export const COSMETIC_SHOP_ITEMS: CosmeticItem[] = [
-  {
-    id: "frame_emerald",
-    name: "Emerald Sprout Frame",
-    category: "frame",
-    icon: "🌿",
-    description: "Classic Duolingo-green victory ring.",
-    priceCoins: 0,
-    previewStyle: "ring-4 ring-[#58CC02] bg-lime-100",
-  },
-  {
-    id: "frame_gold",
-    name: "Solar Gold Crown",
-    category: "frame",
-    icon: "👑",
-    description: "Gleaming gold ring for sharp tacticians.",
-    priceCoins: 350,
-    previewStyle: "ring-4 ring-[#FFC800] bg-amber-100",
-  },
-  {
-    id: "frame_neon",
-    name: "Cyber Neon Frame",
-    category: "frame",
-    icon: "⚡",
-    description: "Electric blue & violet pulse border.",
-    priceGems: 45,
-    previewStyle: "ring-4 ring-[#1CB0F6] bg-sky-100",
-  },
-  {
-    id: "frame_dragon",
-    name: "Dragonfire Aura Frame",
-    category: "frame",
-    icon: "🐉",
-    description: "Blazing crimson frame of Grandmasters.",
-    priceGems: 80,
-    previewStyle: "ring-4 ring-[#FF4B4B] bg-rose-100",
-  },
-  {
-    id: "frame_celestial",
-    name: "Celestial Legend Frame",
-    category: "frame",
-    icon: "🌌",
-    description: "Cosmic amethyst & gold mythic border.",
-    priceGems: 110,
-    previewStyle: "ring-4 ring-[#CE82FF] bg-purple-100",
-  },
-  {
-    id: "theme_classic",
-    name: "Warm Cream Arcade",
-    category: "theme",
-    icon: "🎨",
-    description: "Signature playful tactile cream board.",
-    priceCoins: 0,
-    previewStyle: "bg-[#FFFDF7] border-[#E5E0D5]",
-  },
-  {
-    id: "theme_cyber",
-    name: "Neon Synth Board",
-    category: "theme",
-    icon: "🕹️",
-    description: "High-contrast sky & indigo vault styling.",
-    priceCoins: 500,
-    previewStyle: "bg-sky-50 border-sky-300",
-  },
-  {
-    id: "theme_royal",
-    name: "Royal Velvet Vault",
-    category: "theme",
-    icon: "👑",
-    description: "Regal amethyst and gold accents.",
-    priceGems: 60,
-    previewStyle: "bg-purple-50 border-purple-300",
-  },
-  {
-    id: "effect_confetti",
-    name: "Party Confetti Cannon",
-    category: "effect",
-    icon: "🎉",
-    description: "Explodes with vibrant confetti when you crack a code!",
-    priceCoins: 0,
-    previewStyle: "bg-lime-50",
-  },
-  {
-    id: "effect_lightning",
-    name: "Thunder Strike Finish",
-    category: "effect",
-    icon: "🌩️",
-    description: "Electric gold & cyan sparks on victory.",
-    priceCoins: 450,
-    previewStyle: "bg-amber-50",
-  },
-  {
-    id: "effect_stars",
-    name: "Supernova Starfall",
-    category: "effect",
-    icon: "🌟",
-    description: "Showers the arena with golden stars.",
-    priceGems: 55,
-    previewStyle: "bg-indigo-50",
-  },
-  {
-    id: "title_breaker",
-    name: "Code Breaker",
-    category: "title",
-    icon: "🔓",
-    description: "Equipped profile title.",
-    priceCoins: 0,
-    previewStyle: "bg-slate-100",
-  },
-  {
-    id: "title_grand_cipher",
-    name: "Grand Cipher",
-    category: "title",
-    icon: "🧠",
-    description: "Show opponents you see every permutation.",
-    priceCoins: 400,
-    previewStyle: "bg-amber-100",
-  },
-  {
-    id: "title_oracle_slayer",
-    name: "Oracle Slayer",
-    category: "title",
-    icon: "🔮",
-    description: "Reserved for those who outsmart Aethelgard.",
-    priceGems: 75,
-    previewStyle: "bg-rose-100",
-  },
+export const RARITY_COLORS: Record<Rarity, string> = {
+  common: "#8A97AD",
+  rare: "#1CB0F6",
+  epic: "#A560E8",
+  legendary: "#E0A800",
+};
+
+export const SHOP_ITEMS: CosmeticItem[] = [
+  // Character bases
+  { id: "base_owl", name: "Hoot the Owl", category: "avatar_base", description: "Wise, calm, always watching.", priceCoins: 0, rarity: "common", meta: "owl" },
+  { id: "base_chick", name: "Pip the Chick", category: "avatar_base", description: "Small, loud, fearless.", priceCoins: 150, rarity: "common", meta: "chick" },
+  { id: "base_cat", name: "Whiskers the Cat", category: "avatar_base", description: "Quick paws, quicker brain.", priceCoins: 300, rarity: "common", meta: "cat" },
+  { id: "base_Pup", name: "Biscuit the Pup", category: "avatar_base", description: "Sniffs out secret digits.", priceCoins: 350, rarity: "rare", meta: "Pup" },
+  { id: "base_fox", name: "Ember the Fox", category: "avatar_base", description: "Sly and dangerously clever.", priceCoins: 500, rarity: "rare", meta: "fox" },
+  { id: "base_panda", name: "Bamboo the Panda", category: "avatar_base", description: "Chill outside, genius inside.", priceGems: 40, rarity: "epic", meta: "panda" },
+  { id: "base_robot", name: "Bolt the Bot", category: "avatar_base", description: "3,024 codes per second.", priceGems: 60, rarity: "epic", meta: "robot" },
+  { id: "base_dragon", name: "Drake the Dragon", category: "avatar_base", description: "Legendary code-burning beast.", priceGems: 120, rarity: "legendary", meta: "dragon" },
+  // Colors
+  { id: "color_classic", name: "Meadow Green", category: "avatar_color", description: "The original clash green.", priceCoins: 0, rarity: "common", meta: "classic" },
+  { id: "color_sky", name: "Sky Blue", category: "avatar_color", description: "Fresh and fearless.", priceCoins: 120, rarity: "common", meta: "sky" },
+  { id: "color_sunny", name: "Sunny Side", category: "avatar_color", description: "Pure sunshine energy.", priceCoins: 120, rarity: "common", meta: "sunny" },
+  { id: "color_coral", name: "Coral Pop", category: "avatar_color", description: "Warm and bold.", priceCoins: 200, rarity: "common", meta: "coral" },
+  { id: "color_ocean", name: "Deep Ocean", category: "avatar_color", description: "Calm under pressure.", priceCoins: 250, rarity: "rare", meta: "ocean" },
+  { id: "color_rose", name: "Bubblegum", category: "avatar_color", description: "Sweet but deadly.", priceCoins: 250, rarity: "rare", meta: "rose" },
+  { id: "color_choco", name: "Cocoa", category: "avatar_color", description: "Cozy and confident.", priceCoins: 300, rarity: "rare", meta: "choco" },
+  { id: "color_lava", name: "Lava Glow", category: "avatar_color", description: "Hot streaks guaranteed.", priceCoins: 400, rarity: "rare", meta: "lava" },
+  { id: "color_grape", name: "Grape Soda", category: "avatar_color", description: "Fizzy purple power.", priceGems: 25, rarity: "epic", meta: "grape" },
+  { id: "color_midnight", name: "Midnight", category: "avatar_color", description: "Strikes after dark.", priceGems: 35, rarity: "epic", meta: "midnight" },
+  { id: "color_cosmic", name: "Cosmic Violet", category: "avatar_color", description: "From another galaxy.", priceGems: 55, rarity: "epic", meta: "cosmic" },
+  { id: "color_golden", name: "Golden Legend", category: "avatar_color", description: "Pure championship shine.", priceGems: 90, rarity: "legendary", meta: "golden" },
+  // Accessories
+  { id: "acc_none", name: "No Accessory", category: "avatar_accessory", description: "Clean and classic.", priceCoins: 0, rarity: "common", meta: "none" },
+  { id: "acc_cap", name: "Sport Cap", category: "avatar_accessory", description: "Game day ready.", priceCoins: 180, rarity: "common", meta: "cap" },
+  { id: "acc_bow", name: "Lucky Bow", category: "avatar_accessory", description: "Cute and accurate.", priceCoins: 220, rarity: "common", meta: "bow" },
+  { id: "acc_glasses", name: "Smart Glasses", category: "avatar_accessory", description: "+10 brain power.", priceCoins: 300, rarity: "rare", meta: "glasses" },
+  { id: "acc_party", name: "Party Hat", category: "avatar_accessory", description: "Every guess is a party.", priceCoins: 320, rarity: "rare", meta: "party" },
+  { id: "acc_headphones", name: "Pro Headphones", category: "avatar_accessory", description: "Zero distractions.", priceCoins: 420, rarity: "rare", meta: "headphones" },
+  { id: "acc_shades", name: "Cool Shades", category: "avatar_accessory", description: "Too cool to miscount.", priceGems: 30, rarity: "epic", meta: "shades" },
+  { id: "acc_crown", name: "Royal Crown", category: "avatar_accessory", description: "Code-breaking royalty.", priceGems: 70, rarity: "legendary", meta: "crown" },
+  { id: "acc_wizard", name: "Wizard Hat", category: "avatar_accessory", description: "Sees codes through magic.", priceGems: 60, rarity: "epic", meta: "wizard" },
+  { id: "acc_halo", name: "Angel Halo", category: "avatar_accessory", description: "Pure luck. Probably.", priceGems: 50, rarity: "epic", meta: "halo" },
+  // Frames
+  { id: "frame_emerald", name: "Emerald Sprout Frame", category: "frame", description: "Classic victory green ring.", priceCoins: 0, rarity: "common", meta: "frame_emerald" },
+  { id: "frame_gold", name: "Solar Gold Frame", category: "frame", description: "Gleaming champion gold.", priceCoins: 350, rarity: "rare", meta: "frame_gold" },
+  { id: "frame_obsidian", name: "Obsidian Edge Frame", category: "frame", description: "Sharp and serious.", priceCoins: 600, rarity: "rare", meta: "frame_obsidian" },
+  { id: "frame_pixel", name: "8-Bit Pixel Frame", category: "frame", description: "Retro arcade border.", priceCoins: 420, rarity: "rare", meta: "frame_pixel" },
+  { id: "frame_volcanic", name: "Volcanic Core Frame", category: "frame", description: "Molten and aggressive.", priceCoins: 900, rarity: "epic", meta: "frame_volcanic" },
+  { id: "frame_neon", name: "Cyber Neon Frame", category: "frame", description: "Electric rainbow pulse.", priceGems: 45, rarity: "epic", meta: "frame_neon" },
+  { id: "frame_dragon", name: "Dragonfire Frame", category: "frame", description: "Blazing crimson aura.", priceGems: 80, rarity: "epic", meta: "frame_dragon" },
+  { id: "frame_aurora", name: "Aurora Borealis Frame", category: "frame", description: "Shifting northern lights.", priceGems: 95, rarity: "legendary", meta: "frame_aurora" },
+  { id: "frame_hologram", name: "Hologram Prism Frame", category: "frame", description: "Iridescent light prism.", priceGems: 120, rarity: "legendary", meta: "frame_hologram" },
+  { id: "frame_celestial", name: "Celestial Legend Frame", category: "frame", description: "Mythic cosmic border.", priceGems: 110, rarity: "legendary", meta: "frame_celestial" },
+  // Board themes
+  { id: "theme_classic", name: "Warm Cream Arcade", category: "theme", description: "Signature cozy board.", priceCoins: 0, rarity: "common", meta: "theme_classic" },
+  { id: "theme_forest", name: "Forest Cipher", category: "theme", description: "Calm green woods.", priceCoins: 380, rarity: "common", meta: "theme_forest" },
+  { id: "theme_candy", name: "Candy Arena", category: "theme", description: "Playful pink board.", priceCoins: 480, rarity: "rare", meta: "theme_candy" },
+  { id: "theme_cyber", name: "Neon Synth Board", category: "theme", description: "Electric arcade nights.", priceCoins: 500, rarity: "rare", meta: "theme_cyber" },
+  { id: "theme_midnight", name: "Midnight Arena", category: "theme", description: "Deep navy focus mode.", priceCoins: 550, rarity: "rare", meta: "theme_midnight" },
+  { id: "theme_ice", name: "Frozen Circuit", category: "theme", description: "Ice-cold precision.", priceGems: 55, rarity: "epic", meta: "theme_ice" },
+  { id: "theme_sunset", name: "Sunset Duel", category: "theme", description: "Golden-hour showdowns.", priceGems: 50, rarity: "epic", meta: "theme_sunset" },
+  { id: "theme_royal", name: "Royal Velvet Vault", category: "theme", description: "Regal amethyst & gold.", priceGems: 60, rarity: "epic", meta: "theme_royal" },
+  { id: "theme_volcano", name: "Volcano Pit", category: "theme", description: "Pressure makes diamonds.", priceGems: 75, rarity: "legendary", meta: "theme_volcano" },
+  { id: "theme_galaxy", name: "Galaxy Vault", category: "theme", description: "Codes among the stars.", priceGems: 85, rarity: "legendary", meta: "theme_galaxy" },
+  // Win effects
+  { id: "effect_confetti", name: "Party Confetti", category: "effect", description: "Confetti cannon blast.", priceCoins: 0, rarity: "common", meta: "effect_confetti" },
+  { id: "effect_sparkle", name: "Gold Sparkle Burst", category: "effect", description: "Golden sparkles explode.", priceCoins: 400, rarity: "rare", meta: "effect_sparkle" },
+  { id: "effect_lightning", name: "Thunder Strike", category: "effect", description: "Electric gold & cyan.", priceCoins: 450, rarity: "rare", meta: "effect_lightning" },
+  { id: "effect_matrix", name: "Matrix Rain", category: "effect", description: "Green code-rain cascade.", priceCoins: 520, rarity: "rare", meta: "effect_matrix" },
+  { id: "effect_stars", name: "Supernova Starfall", category: "effect", description: "Golden stars rain down.", priceGems: 55, rarity: "epic", meta: "effect_stars" },
+  { id: "effect_shockwave", name: "Shockwave Ring", category: "effect", description: "Power ring blast.", priceGems: 65, rarity: "epic", meta: "effect_shockwave" },
+  { id: "effect_fireworks", name: "Victory Fireworks", category: "effect", description: "Full-sky celebration.", priceGems: 70, rarity: "legendary", meta: "effect_fireworks" },
+  // Titles
+  { id: "title_breaker", name: "Code Breaker", category: "title", description: "The classic badge.", priceCoins: 0, rarity: "common", meta: "Code Breaker" },
+  { id: "title_sleuth", name: "Digit Sleuth", category: "title", description: "Finds every clue.", priceCoins: 200, rarity: "common", meta: "Digit Sleuth" },
+  { id: "title_night_owl", name: "Night Owl", category: "title", description: "Late-night cracker.", priceCoins: 280, rarity: "common", meta: "Night Owl" },
+  { id: "title_grand_cipher", name: "Grand Cipher", category: "title", description: "Sees every permutation.", priceCoins: 400, rarity: "rare", meta: "Grand Cipher" },
+  { id: "title_digit_lord", name: "Digit Lord", category: "title", description: "Commands the board.", priceCoins: 700, rarity: "rare", meta: "Digit Lord" },
+  { id: "title_streak_king", name: "Streak King", category: "title", description: "Never breaks the chain.", priceGems: 40, rarity: "epic", meta: "Streak King" },
+  { id: "title_cipher_ghost", name: "Cipher Ghost", category: "title", description: "Silent and three steps ahead.", priceGems: 75, rarity: "epic", meta: "Cipher Ghost" },
+  { id: "title_oracle_slayer", name: "Oracle Slayer", category: "title", description: "Outsmarted Aethelgard.", priceGems: 75, rarity: "epic", meta: "Oracle Slayer" },
+  { id: "title_legend_candidate", name: "Legend Candidate", category: "title", description: "One step from the top.", priceGems: 150, rarity: "legendary", meta: "Legend Candidate" },
 ];
+
+export function getShopItem(id: string): CosmeticItem | undefined {
+  return SHOP_ITEMS.find((i) => i.id === id);
+}
+
+export const STARTER_OWNED = [
+  "base_owl", "color_classic", "acc_none",
+  "frame_emerald", "theme_classic", "effect_confetti", "title_breaker",
+];
+
+/* ------------------------------- Economy -------------------------------- */
+
+export function computeTrophyDelta(won: boolean, mode: string, aiDifficulty?: string): number {
+  let base = 20;
+  if (mode === "online_1v1") base = 28;
+  else if (mode === "hotseat" || mode === "local_offline") base = 0; // friendly, no trophies
+  else if (mode === "ai") {
+    if (aiDifficulty === "Oracle") base = 42;
+    else if (aiDifficulty === "Mastermind") base = 30;
+    else if (aiDifficulty === "Tactician") base = 22;
+    else base = 14;
+  }
+  if (!won) return base === 0 ? 0 : -Math.max(8, Math.floor(base * 0.45));
+  return base;
+}
+
+/* ---------------------------- Daily quests ------------------------------ */
 
 export interface DailyQuestItem {
   id: string;
   title: string;
   description: string;
-  icon: string;
   target: number;
+  statKey: "games" | "orders" | "wins" | "fastWins";
   rewardCoins: number;
   rewardXp: number;
   rewardGems?: number;
 }
 
 export const DAILY_QUESTS: DailyQuestItem[] = [
-  {
-    id: "quest_play_2",
-    title: "Code Warmup",
-    description: "Complete 2 matches in any mode",
-    icon: "🎯",
-    target: 2,
-    rewardCoins: 120,
-    rewardXp: 150,
-  },
-  {
-    id: "quest_orders_8",
-    title: "Precision Lock",
-    description: "Score 8 total Orders (green hits) across matches",
-    icon: "🟢",
-    target: 8,
-    rewardCoins: 180,
-    rewardXp: 200,
-  },
-  {
-    id: "quest_beat_ai",
-    title: "Bot Hunter",
-    description: "Defeat any AI opponent or win a 1v1 match",
-    icon: "🤖",
-    target: 1,
-    rewardCoins: 200,
-    rewardXp: 250,
-    rewardGems: 15,
-  },
-  {
-    id: "quest_fast_win",
-    title: "Speed Cipher",
-    description: "Crack an opponent's code in 6 turns or fewer",
-    icon: "⚡",
-    target: 1,
-    rewardCoins: 250,
-    rewardXp: 300,
-    rewardGems: 25,
-  },
+  { id: "quest_play_2", title: "Code Warmup", description: "Play 2 matches today", target: 2, statKey: "games", rewardCoins: 120, rewardXp: 150 },
+  { id: "quest_orders_8", title: "Precision Lock", description: "Score 8 Orders (green hits) today", target: 8, statKey: "orders", rewardCoins: 180, rewardXp: 200 },
+  { id: "quest_win_1", title: "Cracker of the Day", description: "Win 1 match today", target: 1, statKey: "wins", rewardCoins: 200, rewardXp: 250, rewardGems: 15 },
+  { id: "quest_fast_win", title: "Speed Cipher", description: "Win a match in 6 turns or fewer", target: 1, statKey: "fastWins", rewardCoins: 250, rewardXp: 300, rewardGems: 25 },
 ];
 
-export interface AchievementItem {
-  id: string;
-  title: string;
-  description: string;
-  icon: string;
-  rewardGems: number;
+export interface DailyStats {
+  date: string;
+  games: number;
+  wins: number;
+  orders: number;
+  fastWins: number;
 }
 
-export const ACHIEVEMENTS: AchievementItem[] = [
-  {
-    id: "first_crack",
-    title: "First Crack!",
-    description: "Achieve 4 Points + 4 Orders for the first time.",
-    icon: "🔓",
-    rewardGems: 20,
-  },
-  {
-    id: "streak_3",
-    title: "On Fire!",
-    description: "Maintain a 3+ day play streak.",
-    icon: "🔥",
-    rewardGems: 25,
-  },
-  {
-    id: "mind_reader",
-    title: "Mind Reader",
-    description: "Crack a secret code in 4 turns or fewer.",
-    icon: "🧠",
-    rewardGems: 50,
-  },
-  {
-    id: "oracle_slayer",
-    title: "Oracle Slayer",
-    description: "Defeat Aethelgard (Oracle AI) in a 1v1 duel.",
-    icon: "🔮",
-    rewardGems: 100,
-  },
-  {
-    id: "social_butterfly",
-    title: "Squad Builder",
-    description: "Follow 3 rivals and join a Club.",
-    icon: "🤝",
-    rewardGems: 30,
-  },
-];
-
-/** Extra cosmetics — richer customization */
-export const EXTRA_COSMETICS: CosmeticItem[] = [
-  {
-    id: "frame_obsidian",
-    name: "Obsidian Edge",
-    category: "frame",
-    icon: "⬛",
-    description: "Sharp black frame for serious competitors.",
-    priceCoins: 600,
-    previewStyle: "ring-4 ring-slate-800 bg-slate-200",
-  },
-  {
-    id: "frame_aurora",
-    name: "Aurora Borealis",
-    category: "frame",
-    icon: "aurora",
-    description: "Shifting teal-to-violet glow ring.",
-    priceGems: 95,
-    previewStyle: "ring-4 ring-teal-400 bg-gradient-to-br from-teal-100 to-violet-100",
-  },
-  {
-    id: "frame_pixel",
-    name: "8-Bit Pixel Frame",
-    category: "frame",
-    icon: "👾",
-    description: "Retro arcade border for pixel legends.",
-    priceCoins: 420,
-    previewStyle: "ring-4 ring-fuchsia-500 bg-fuchsia-50",
-  },
-  {
-    id: "theme_midnight",
-    name: "Midnight Arena",
-    category: "theme",
-    icon: "🌙",
-    description: "Deep navy board with soft glow accents.",
-    priceCoins: 550,
-    previewStyle: "bg-slate-900 border-slate-600",
-  },
-  {
-    id: "theme_sunset",
-    name: "Sunset Duel",
-    category: "theme",
-    icon: "🌅",
-    description: "Warm orange-to-rose play surface.",
-    priceGems: 50,
-    previewStyle: "bg-orange-50 border-orange-300",
-  },
-  {
-    id: "theme_forest",
-    name: "Forest Cipher",
-    category: "theme",
-    icon: "🌲",
-    description: "Calm green woods aesthetic.",
-    priceCoins: 380,
-    previewStyle: "bg-emerald-50 border-emerald-300",
-  },
-  {
-    id: "effect_fireworks",
-    name: "Victory Fireworks",
-    category: "effect",
-    icon: "🎆",
-    description: "Full-screen fireworks on a win.",
-    priceGems: 70,
-    previewStyle: "bg-rose-50",
-  },
-  {
-    id: "effect_matrix",
-    name: "Matrix Rain",
-    category: "effect",
-    icon: "💻",
-    description: "Green code rain cascade on finish.",
-    priceCoins: 520,
-    previewStyle: "bg-green-50",
-  },
-  {
-    id: "title_digit_lord",
-    name: "Digit Lord",
-    category: "title",
-    icon: "♟️",
-    description: "Command the board like a grandmaster.",
-    priceCoins: 700,
-    previewStyle: "bg-indigo-100",
-  },
-  {
-    id: "title_streak_king",
-    name: "Streak King",
-    category: "title",
-    icon: "🔥",
-    description: "For players who never break the chain.",
-    priceGems: 40,
-    previewStyle: "bg-orange-100",
-  },
-  {
-    id: "title_night_owl",
-    name: "Night Owl",
-    category: "title",
-    icon: "🦉",
-    description: "Late-night code cracker badge.",
-    priceCoins: 280,
-    previewStyle: "bg-slate-100",
-  },
-  {
-    id: "title_socialite",
-    name: "Arena Socialite",
-    category: "title",
-    icon: "💬",
-    description: "Chat, follow, and duel in style.",
-    priceCoins: 320,
-    previewStyle: "bg-pink-100",
-  },
-];
-
-/** Merge shop lists */
-export function getAllShopItems(): CosmeticItem[] {
-  return getFullShopCatalog();
+export function emptyDailyStats(date: string): DailyStats {
+  return { date, games: 0, wins: 0, orders: 0, fastWins: 0 };
 }
 
-export const EXTRA_ACHIEVEMENTS: AchievementItem[] = [
-  {
-    id: "win_10",
-    title: "Decade of Cracks",
-    description: "Win 10 matches total.",
-    icon: "🔟",
-    rewardGems: 40,
-  },
-  {
-    id: "win_50",
-    title: "Half Century",
-    description: "Win 50 matches total.",
-    icon: "5️⃣0️⃣",
-    rewardGems: 120,
-  },
-  {
-    id: "trophies_100",
-    title: "Silver Climber",
-    description: "Reach 100 trophies (Silver division).",
-    icon: "🥈",
-    rewardGems: 35,
-  },
-  {
-    id: "trophies_250",
-    title: "Gold Standard",
-    description: "Reach 250 trophies (Gold division).",
-    icon: "🥇",
-    rewardGems: 60,
-  },
-  {
-    id: "trophies_700",
-    title: "Diamond Mind",
-    description: "Reach 700 trophies (Diamond).",
-    icon: "💎",
-    rewardGems: 100,
-  },
-  {
-    id: "perfect_game",
-    title: "Perfect Cipher",
-    description: "Win in 3 turns or fewer.",
-    icon: "✨",
-    rewardGems: 80,
-  },
-  {
-    id: "comeback",
-    title: "Comeback Kid",
-    description: "Win after being behind on Orders early.",
-    icon: "📈",
-    rewardGems: 45,
-  },
-  {
-    id: "daily_3",
-    title: "Daily Devotee",
-    description: "Complete 3 daily challenges.",
-    icon: "📅",
-    rewardGems: 55,
-  },
-  {
-    id: "chatty",
-    title: "Loud and Proud",
-    description: "Send 20 chat messages.",
-    icon: "🗣️",
-    rewardGems: 25,
-  },
-  {
-    id: "mastermind_beat",
-    title: "Out-Thought",
-    description: "Defeat Mastermind AI.",
-    icon: "🦉",
-    rewardGems: 55,
-  },
-];
+/* --------------------------- Daily challenge ---------------------------- */
 
-export function getAllAchievements(): AchievementItem[] {
-  return getFullAchievements();
-}
-
-/** Daily Challenge — rules change by day of year */
-export type DailyChallengeRule =
-  | "classic"
-  | "speed_30"
-  | "no_orders_hint"
-  | "three_guess_max"
-  | "mirror_digits"
-  | "hard_ai_only";
+export type DailyChallengeRule = "classic" | "speed_30" | "no_orders_hint" | "three_guess_max" | "hard_ai_only";
 
 export interface DailyChallengeInfo {
   id: string;
@@ -937,7 +489,6 @@ export interface DailyChallengeInfo {
   title: string;
   description: string;
   rule: DailyChallengeRule;
-  icon: string;
   bonusMultiplier: number;
 }
 
@@ -945,231 +496,60 @@ export function getDailyChallenge(date = new Date()): DailyChallengeInfo {
   const start = new Date(date.getFullYear(), 0, 0);
   const day = Math.floor((date.getTime() - start.getTime()) / 86400000);
   const dateKey = date.toISOString().slice(0, 10);
-
   const pool: Omit<DailyChallengeInfo, "id" | "dateKey">[] = [
-    {
-      title: "Classic Cipher",
-      description: "Standard rules. Win for a small daily bonus.",
-      rule: "classic",
-      icon: "🔓",
-      bonusMultiplier: 1.25,
-    },
-    {
-      title: "Speed Rush",
-      description: "Every turn is limited to 30 seconds. Think fast!",
-      rule: "speed_30",
-      icon: "⏱️",
-      bonusMultiplier: 1.5,
-    },
-    {
-      title: "Blind Orders",
-      description: "You only see Points — Orders are hidden until the end.",
-      rule: "no_orders_hint",
-      icon: "🙈",
-      bonusMultiplier: 1.6,
-    },
-    {
-      title: "Three Strikes",
-      description: "You have only 3 guesses. Make them count.",
-      rule: "three_guess_max",
-      icon: "3️⃣",
-      bonusMultiplier: 2.0,
-    },
-    {
-      title: "Mirror Mode",
-      description: "Secret codes never use consecutive ascending digits.",
-      rule: "mirror_digits",
-      icon: "🪞",
-      bonusMultiplier: 1.4,
-    },
-    {
-      title: "Oracle Gauntlet",
-      description: "Face Mastermind or harder AI only. Big rewards.",
-      rule: "hard_ai_only",
-      icon: "🔮",
-      bonusMultiplier: 1.8,
-    },
+    { title: "Classic Cipher", description: "Standard rules with a daily bonus.", rule: "classic", bonusMultiplier: 1.25 },
+    { title: "Speed Rush", description: "30 seconds per turn. Think fast!", rule: "speed_30", bonusMultiplier: 1.5 },
+    { title: "Blind Orders", description: "Orders hidden — Points only until you win.", rule: "no_orders_hint", bonusMultiplier: 1.6 },
+    { title: "Blitz Duel", description: "Fast 30-second turns against Professor Hoot.", rule: "speed_30", bonusMultiplier: 1.7 },
+    { title: "Oracle Gauntlet", description: "Face Mastermind or harder. Big rewards.", rule: "hard_ai_only", bonusMultiplier: 1.8 },
   ];
-
   const pick = pool[day % pool.length];
-  return {
-    id: `daily_${dateKey}`,
-    dateKey,
-    ...pick,
-  };
+  return { id: `daily_${dateKey}`, dateKey, ...pick };
 }
 
-/** Harder trophy curve — smaller gains, ranks climb slower */
-export function computeTrophyDelta(
-  won: boolean,
-  mode: string,
-  aiDifficulty?: string,
-  baseFromProfile?: number
-): number {
-  let base = baseFromProfile ?? 20;
-  if (mode === "online_1v1") base = 28;
-  else if (mode === "hotseat" || mode === "local_offline") base = 18;
-  else if (mode === "ai") {
-    if (aiDifficulty === "Oracle") base = 42;
-    else if (aiDifficulty === "Mastermind") base = 30;
-    else if (aiDifficulty === "Tactician") base = 22;
-    else base = 14;
-  }
-  if (!won) return -Math.max(8, Math.floor(base * 0.45));
-  return base;
+/* ----------------------------- Achievements ----------------------------- */
+
+export interface AchievementItem {
+  id: string;
+  title: string;
+  description: string;
+  rewardGems: number;
 }
 
-/** More shop items for deep customization */
-export const MEGA_COSMETICS: CosmeticItem[] = [
-  {
-    id: "frame_hologram",
-    name: "Hologram Prism",
-    category: "frame",
-    icon: "💎",
-    description: "Iridescent prism frame that shifts with light.",
-    priceGems: 120,
-    previewStyle: "ring-4 ring-cyan-300 bg-gradient-to-br from-cyan-50 to-pink-50",
-  },
-  {
-    id: "frame_volcanic",
-    name: "Volcanic Core",
-    category: "frame",
-    icon: "🌋",
-    description: "Molten orange-red border for aggressive players.",
-    priceCoins: 900,
-    previewStyle: "ring-4 ring-orange-600 bg-orange-100",
-  },
-  {
-    id: "theme_candy",
-    name: "Candy Arena",
-    category: "theme",
-    icon: "🍬",
-    description: "Playful pink candy board for cheerful duels.",
-    priceCoins: 480,
-    previewStyle: "bg-pink-50 border-pink-300",
-  },
-  {
-    id: "theme_ice",
-    name: "Frozen Circuit",
-    category: "theme",
-    icon: "❄️",
-    description: "Icy blue minimalist surface.",
-    priceGems: 55,
-    previewStyle: "bg-sky-50 border-sky-300",
-  },
-  {
-    id: "effect_sparkle",
-    name: "Gold Sparkle Burst",
-    category: "effect",
-    icon: "✨",
-    description: "Golden sparkles explode on every win.",
-    priceCoins: 400,
-    previewStyle: "bg-amber-50",
-  },
-  {
-    id: "effect_shockwave",
-    name: "Shockwave Ring",
-    category: "effect",
-    icon: "💥",
-    description: "Ripple shockwave when you crack the code.",
-    priceGems: 65,
-    previewStyle: "bg-red-50",
-  },
-  {
-    id: "title_cipher_ghost",
-    name: "Cipher Ghost",
-    category: "title",
-    icon: "👻",
-    description: "Silent, deadly, always three steps ahead.",
-    priceGems: 75,
-    previewStyle: "bg-violet-100",
-  },
-  {
-    id: "title_bronze_survivor",
-    name: "Bronze Survivor",
-    category: "title",
-    icon: "🛡️",
-    description: "Climbed out of Bronze the hard way.",
-    priceCoins: 150,
-    previewStyle: "bg-amber-100",
-  },
-  {
-    id: "title_legend_candidate",
-    name: "Legend Candidate",
-    category: "title",
-    icon: "🏅",
-    description: "One step from the top of the world.",
-    priceGems: 150,
-    previewStyle: "bg-lime-100",
-  },
+export const ACHIEVEMENTS: AchievementItem[] = [
+  { id: "first_crack", title: "First Crack!", description: "Win your first match.", rewardGems: 20 },
+  { id: "win_10", title: "Decade of Cracks", description: "Win 10 matches.", rewardGems: 40 },
+  { id: "win_50", title: "Half Century", description: "Win 50 matches.", rewardGems: 120 },
+  { id: "win_100", title: "Century Club", description: "Win 100 matches.", rewardGems: 200 },
+  { id: "mind_reader", title: "Mind Reader", description: "Win in 4 turns or fewer.", rewardGems: 50 },
+  { id: "perfect_game", title: "Perfect Cipher", description: "Win in 3 turns or fewer.", rewardGems: 80 },
+  { id: "fast_2", title: "Two-Turn Miracle", description: "Win in exactly 2 guesses.", rewardGems: 150 },
+  { id: "mastermind_beat", title: "Out-Thought", description: "Defeat Professor Hoot.", rewardGems: 55 },
+  { id: "oracle_slayer", title: "Oracle Slayer", description: "Defeat Aethelgard, the Grand Oracle.", rewardGems: 100 },
+  { id: "trophies_100", title: "Silver Climber", description: "Reach 100 trophies.", rewardGems: 35 },
+  { id: "trophies_250", title: "Gold Standard", description: "Reach 250 trophies.", rewardGems: 60 },
+  { id: "trophies_700", title: "Diamond Mind", description: "Reach 700 trophies.", rewardGems: 100 },
+  { id: "trophies_1000", title: "Master Threshold", description: "Reach 1,000 trophies.", rewardGems: 150 },
+  { id: "trophies_1900", title: "Living Legend", description: "Reach 1,900 trophies.", rewardGems: 300 },
+  { id: "streak_3", title: "On Fire!", description: "Reach a 3-day streak.", rewardGems: 25 },
+  { id: "streak_7", title: "Week Warrior", description: "Reach a 7-day streak.", rewardGems: 80 },
 ];
 
-/** Extended achievements — harder to earn */
-export const MEGA_ACHIEVEMENTS: AchievementItem[] = [
-  {
-    id: "win_100",
-    title: "Century Club",
-    description: "Win 100 matches total.",
-    icon: "💯",
-    rewardGems: 200,
-  },
-  {
-    id: "trophies_1000",
-    title: "Master Threshold",
-    description: "Reach 1000 trophies (Master division).",
-    icon: "🔮",
-    rewardGems: 150,
-  },
-  {
-    id: "trophies_1900",
-    title: "Living Legend",
-    description: "Reach 1900 trophies (Legend division).",
-    icon: "⚡",
-    rewardGems: 300,
-  },
-  {
-    id: "fast_2",
-    title: "Two-Turn Miracle",
-    description: "Win a match in exactly 2 guesses.",
-    icon: "🚀",
-    rewardGems: 150,
-  },
-  {
-    id: "streak_7",
-    title: "Week Warrior",
-    description: "Keep a 7-day login streak.",
-    icon: "📅",
-    rewardGems: 80,
-  },
-  {
-    id: "no_timeout",
-    title: "Never Late",
-    description: "Win 5 matches without a single timeout.",
-    icon: "⏰",
-    rewardGems: 40,
-  },
-  {
-    id: "social_10",
-    title: "Networked",
-    description: "Follow 10 different players.",
-    icon: "🌐",
-    rewardGems: 50,
-  },
-  {
-    id: "daily_7",
-    title: "Challenge Addict",
-    description: "Complete 7 daily challenges.",
-    icon: "🎯",
-    rewardGems: 100,
-  },
+/* ------------------------------ Reactions ------------------------------- */
+
+/** Icon-based quick reactions (rendered with Lucide icons, never emoji). */
+export const REACTION_IDS = [
+  "thumbs_up", "fire", "laugh", "wow", "rocket", "target", "heart", "star",
+] as const;
+export type ReactionId = (typeof REACTION_IDS)[number];
+
+export const QUICK_PHRASES = [
+  "Good luck!",
+  "Nice try!",
+  "So close!",
+  "Oops!",
+  "Bring it on!",
+  "Great game!",
+  "Rematch?",
+  "I'm coming for that code!",
 ];
-
-// Patch getAllShopItems / getAllAchievements if they exist as simple returns —
-// callers should use these helpers:
-export function getFullShopCatalog(): CosmeticItem[] {
-  return [...COSMETIC_SHOP_ITEMS, ...EXTRA_COSMETICS, ...MEGA_COSMETICS];
-}
-
-export function getFullAchievements(): AchievementItem[] {
-  return [...ACHIEVEMENTS, ...EXTRA_ACHIEVEMENTS, ...MEGA_ACHIEVEMENTS];
-}

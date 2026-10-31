@@ -1,798 +1,487 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { players, clubs, follows, matches, tournaments } from "@/db/schema";
+import { players, resultLog } from "@/db/schema";
 import { ensureDatabaseReady } from "@/db/seed";
-import { isSupabaseConfigured } from "@/lib/supabase";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import {
   getDivisionForTrophies,
-  COSMETIC_SHOP_ITEMS,
-  getAllShopItems,
-  SEASON_PASS_TIERS,
+  getShopItem,
+  STARTER_OWNED,
   DAILY_QUESTS,
+  ACHIEVEMENTS,
+  emptyDailyStats,
+  getDailyChallenge,
+  type DailyStats,
 } from "@/lib/game-engine";
+import { normalizeAvatar } from "@/lib/avatar";
+import { hashPassword, verifyPassword, issueToken, verifyToken, adminUsernames } from "@/lib/auth-server";
+import { sanitizeUsername } from "@/lib/security";
+
+type PlayerRow = typeof players.$inferSelect;
+
+function publicPlayer(p: PlayerRow) {
+  const { passwordHash, ...rest } = p;
+  return {
+    ...rest,
+    avatarConfig: normalizeAvatar(p.avatarConfig),
+    ownedCosmetics: Array.isArray(p.ownedCosmetics) ? p.ownedCosmetics : [...STARTER_OWNED],
+    completedAchievements: Array.isArray(p.completedAchievements) ? p.completedAchievements : [],
+    claimedDailyQuests: Array.isArray(p.claimedDailyQuests) ? p.claimedDailyQuests : [],
+    isGuest: false,
+  };
+}
+
+/** Local date (YYYY-MM-DD) for a client tz offset in minutes EAST of UTC. */
+function localDateStr(tzOffsetEastMinutes: number, base = new Date()): string {
+  const shifted = new Date(base.getTime() + tzOffsetEastMinutes * 60000);
+  return shifted.toISOString().slice(0, 10);
+}
+
+function daysBetween(a: string, b: string): number {
+  const da = Date.parse(a + "T00:00:00Z");
+  const db2 = Date.parse(b + "T00:00:00Z");
+  return Math.round((db2 - da) / 86400000);
+}
+
+/**
+ * The REAL streak logic (the old app never had any):
+ * - same day          -> streak unchanged
+ * - yesterday         -> streak + 1 (+ login bonus, milestone gems)
+ * - older / first day -> streak = 1
+ */
+async function applyStreak(p: PlayerRow, tzEast: number) {
+  const today = localDateStr(tzEast);
+  if (p.lastPlayDate === today) return { player: p, streakInfo: null as null | object };
+
+  let streak = 1;
+  let bonusCoins = 25;
+  let bonusGems = 0;
+  if (p.lastPlayDate && daysBetween(p.lastPlayDate, today) === 1) {
+    streak = (p.streakDays || 1) + 1;
+    bonusCoins = 25 + Math.min(streak, 10) * 5;
+    if (streak === 3) bonusGems = 10;
+    if (streak === 7) bonusGems = 30;
+    if (streak === 14) bonusGems = 60;
+    if (streak === 30) bonusGems = 150;
+  }
+
+  const achievements = Array.isArray(p.completedAchievements) ? [...p.completedAchievements] : [];
+  if (streak >= 3 && !achievements.includes("streak_3")) { achievements.push("streak_3"); bonusGems += 25; }
+  if (streak >= 7 && !achievements.includes("streak_7")) { achievements.push("streak_7"); bonusGems += 80; }
+
+  const stats: DailyStats =
+    p.dailyStats && p.dailyStats.date === today ? p.dailyStats : emptyDailyStats(today);
+
+  const [updated] = await db
+    .update(players)
+    .set({
+      streakDays: streak,
+      lastPlayDate: today,
+      dailyStats: stats,
+      coins: p.coins + bonusCoins,
+      gems: p.gems + bonusGems,
+      completedAchievements: achievements,
+      lastSeenAt: new Date(),
+      isOnline: true,
+    })
+    .where(eq(players.id, p.id))
+    .returning();
+
+  return {
+    player: updated,
+    streakInfo: { streakDays: streak, bonusCoins, bonusGems, isNewDay: true },
+  };
+}
+
+async function findByUsername(name: string): Promise<PlayerRow | null> {
+  const exact = await db.select().from(players).where(eq(players.username, name)).limit(1);
+  if (exact[0]) return exact[0];
+  const ci = await db
+    .select()
+    .from(players)
+    .where(sql`lower(${players.username}) = lower(${name})`)
+    .limit(1);
+  return ci[0] || null;
+}
+
+function guestProfile(name: string) {
+  return {
+    id: null,
+    username: name.slice(0, 16),
+    authProvider: "guest",
+    avatarConfig: { base: "owl", color: "classic", accessory: "none" },
+    title: "Code Breaker",
+    frameId: "frame_emerald",
+    themeId: "theme_classic",
+    effectId: "effect_confetti",
+    division: "Bronze",
+    trophies: 0,
+    level: 1,
+    xp: 0,
+    ownedCosmetics: [...STARTER_OWNED],
+    completedAchievements: [] as string[],
+    claimedDailyQuests: [] as string[],
+    dailyStats: emptyDailyStats(new Date().toISOString().slice(0, 10)),
+    dailyChallengeDone: null,
+    coins: 250,
+    gems: 20,
+    streakDays: 1,
+    lastPlayDate: new Date().toISOString().slice(0, 10),
+    wins: 0,
+    losses: 0,
+    totalGames: 0,
+    fastestWinTurns: null,
+    tutorialSeen: false,
+    isAdmin: false,
+    isGuest: true,
+  };
+}
+
+/* --------------------------------- GET --------------------------------- */
 
 export async function GET(req: NextRequest) {
   try {
     await ensureDatabaseReady();
     const { searchParams } = new URL(req.url);
-    const rawPlayerId = searchParams.get("playerId");
-    const requestedPlayerId = rawPlayerId ? Number(rawPlayerId) : null;
+    const token = searchParams.get("token") || req.headers.get("authorization")?.replace("Bearer ", "");
+    const playerId = verifyToken(token);
+    const tzEast = Number(searchParams.get("tz") || 0);
 
-    const allPlayersRaw = await db
-      .select()
-      .from(players)
-      .orderBy(desc(players.trophies));
+    let currentPlayer: ReturnType<typeof publicPlayer> | null = null;
+    let streakInfo: object | null = null;
 
-    // Mark players offline if they haven't been seen in the last 2 minutes
-    const ONLINE_THRESHOLD_MS = 3 * 60 * 1000; // 3 minutes
-    const now = Date.now();
-    const allPlayers = allPlayersRaw.map((p) => {
-      const lastSeen = p.lastSeenAt ? new Date(p.lastSeenAt).getTime() : 0;
-      const isReallyOnline = p.isOnline && now - lastSeen < ONLINE_THRESHOLD_MS;
-      return { ...p, isOnline: isReallyOnline };
-    });
-
-    const currentPlayer = requestedPlayerId
-      ? allPlayers.find((p) => p.id === requestedPlayerId) || null
-      : null;
-
-    // Update currentPlayer's lastSeenAt & online status if they exist
-    if (currentPlayer) {
-      await db
-        .update(players)
-        .set({ isOnline: true, lastSeenAt: new Date() })
-        .where(eq(players.id, currentPlayer.id));
-      // Reflect immediately in the response
-      currentPlayer.isOnline = true;
-      currentPlayer.lastSeenAt = new Date();
+    if (playerId) {
+      const [row] = await db.select().from(players).where(eq(players.id, playerId)).limit(1);
+      if (row) {
+        const res = await applyStreak(row, Number.isFinite(tzEast) ? tzEast : 0);
+        streakInfo = res.streakInfo;
+        currentPlayer = publicPlayer(res.player);
+        // Presence heartbeat is owned by the client's POST "heartbeat" action,
+        // so GET stays read-only and single-flight (no racing writes).
+      }
     }
 
-    const allClubs = await db
-      .select()
-      .from(clubs)
-      .orderBy(desc(clubs.totalTrophies));
-
-    const allFollows = await db.select().from(follows);
-    const followingIds = currentPlayer
-      ? allFollows
-          .filter((f) => f.followerId === currentPlayer.id)
-          .map((f) => f.followingId)
-      : [];
-    const followerIds = currentPlayer
-      ? allFollows
-          .filter((f) => f.followingId === currentPlayer.id)
-          .map((f) => f.followerId)
-      : [];
-
-    const activeMatches = await db
-      .select()
-      .from(matches)
-      .orderBy(desc(matches.createdAt))
-      .limit(20);
-
-    const allTournaments = await db
-      .select()
-      .from(tournaments)
-      .orderBy(desc(tournaments.createdAt));
-
-    const supabaseReady =
-      isSupabaseConfigured ||
-      Boolean(process.env.SUPABASE_DB_URL) ||
-      Boolean(process.env.DATABASE_URL?.includes("supabase"));
-
-    // Security: never send opponent secrets to the client in the general state
-    const safeMatches = activeMatches.map((m) => ({
-      ...m,
-      player1Secret: "",
-      player2Secret: "",
+    const top = await db.select().from(players).orderBy(desc(players.trophies)).limit(100);
+    const now = Date.now();
+    const leaderboard = top.map((p) => ({
+      id: p.id,
+      username: p.username,
+      avatarConfig: normalizeAvatar(p.avatarConfig),
+      frameId: p.frameId,
+      title: p.title,
+      division: p.division,
+      trophies: p.trophies,
+      level: p.level,
+      wins: p.wins,
+      totalGames: p.totalGames,
+      streakDays: p.streakDays,
+      isOnline: p.isOnline && now - new Date(p.lastSeenAt).getTime() < 3 * 60 * 1000,
     }));
 
-    const safeTournaments = allTournaments.map((t) => ({
-      ...t,
-      secretCode: t.isPrivate ? "" : t.secretCode,
-    }));
-
-    return NextResponse.json({
-      currentPlayer,
-      leaderboard: allPlayers,
-      clubs: allClubs,
-      followingIds,
-      followerIds,
-      matches: safeMatches,
-      tournaments: safeTournaments,
-      supabaseReady,
-    });
+    return NextResponse.json({ currentPlayer, leaderboard, streakInfo });
   } catch (error) {
     console.error("GET /api/state error:", error);
-    return NextResponse.json(
-      { error: "Failed to load game state" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to load game state" }, { status: 500 });
   }
 }
+
+/* --------------------------------- POST -------------------------------- */
 
 export async function POST(req: NextRequest) {
   try {
     await ensureDatabaseReady();
-    const body = await req.json();
-    const { action, playerId } = body;
+    const body = await req.json().catch(() => ({}));
+    const { action } = body;
+    const tzEast = Number(body.tz ?? 0);
 
-    // 1. Authentication: Login, Register, Google Continue, or Guest Play (100% Real Data)
+    /* ------------------------------ AUTH ------------------------------ */
     if (action === "auth") {
-      const { mode, username, password, avatarEmoji } = body;
-      const cleanName = (username || "").trim();
+      const mode = body.mode as string;
+      const name = sanitizeUsername(body.username || "");
+      const password = typeof body.password === "string" ? body.password : "";
 
       if (mode === "guest") {
-        // Guests are LOCAL ONLY — never written to the database
-        const guestName =
-          cleanName || `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
-        const localGuest = {
-          id: null,
-          username: guestName.slice(0, 16),
-          passwordHash: "",
-          authProvider: "guest",
-          avatarEmoji: avatarEmoji || "🦉",
-          title: "Guest Breaker",
-          frameId: "frame_emerald",
-          themeId: "theme_classic",
-          effectId: "effect_confetti",
-          division: "Bronze",
-          trophies: 0,
-          level: 1,
-          xp: 0,
-          seasonXp: 0,
-          hasPremiumPass: false,
-          claimedFreeTiers: [],
-          claimedPremiumTiers: [],
-          ownedCosmetics: ["frame_emerald", "theme_classic", "effect_confetti", "title_breaker"],
-          completedAchievements: [],
-          claimedQuests: [],
-          coins: 0,
-          gems: 0,
-          streakDays: 1,
-          wins: 0,
-          losses: 0,
-          totalGames: 0,
-          fastestWinTurns: null,
-          clubId: null,
-          isOnline: true,
-          lastSeenAt: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-          isGuest: true,
-        };
-        return NextResponse.json({ player: localGuest });
+        const guestName = name || `Guest${Math.floor(1000 + Math.random() * 9000)}`;
+        return NextResponse.json({ player: guestProfile(guestName), token: null });
       }
 
-      if (mode === "google") {
-        if (!cleanName) {
-          return NextResponse.json(
-            { error: "Please enter your username to continue with Google." },
-            { status: 400 }
-          );
+      if (name.length < 3) {
+        return NextResponse.json({ error: "Username must be at least 3 characters." }, { status: 400 });
+      }
+
+      const existing = await findByUsername(name);
+
+      if (mode === "register") {
+        if (existing) {
+          return NextResponse.json({ error: "That username is taken. Try signing in!" }, { status: 400 });
         }
-        const existing = await db
-          .select()
-          .from(players)
-          .where(eq(players.username, cleanName));
-        if (existing.length > 0) {
-          return NextResponse.json({ player: existing[0] });
+        if (password.length < 4) {
+          return NextResponse.json({ error: "Password must be at least 4 characters." }, { status: 400 });
         }
+        const today = localDateStr(Number.isFinite(tzEast) ? tzEast : 0);
         const [created] = await db
           .insert(players)
           .values({
-            username: cleanName,
-            authProvider: "google",
-            avatarEmoji: avatarEmoji || "🦊",
-            title: "Code Breaker",
-            division: "Bronze",
-            trophies: 0,
-            level: 1,
-            xp: 0,
-            seasonXp: 0,
-            coins: 0,
-            gems: 0,
+            username: name,
+            passwordHash: hashPassword(password),
+            authProvider: "local",
+            coins: 250,
+            gems: 20,
             streakDays: 1,
-            wins: 0,
-            losses: 0,
-            totalGames: 0,
+            lastPlayDate: today,
+            dailyStats: emptyDailyStats(today),
+            ownedCosmetics: [...STARTER_OWNED],
+            isAdmin: adminUsernames().includes(name.toLowerCase()),
           })
           .returning();
-        return NextResponse.json({ player: created });
+        return NextResponse.json({ player: publicPlayer(created), token: issueToken(created.id) });
       }
 
-      if (!cleanName) {
-        return NextResponse.json(
-          { error: "Please enter a username" },
-          { status: 400 }
-        );
+      // login
+      if (!existing) {
+        return NextResponse.json({ error: "Username not found. Create an account first!" }, { status: 404 });
       }
-
-      const existing = await db
-        .select()
-        .from(players)
-        .where(eq(players.username, cleanName));
-
-      if (mode === "login") {
-        if (existing.length === 0) {
+      if (!existing.passwordHash) {
+        // Legacy account without a password: let them claim it now.
+        if (password.length < 4) {
           return NextResponse.json(
-            { error: "Username not found. Create an account first!" },
-            { status: 404 }
+            { error: "This account has no password yet. Enter a new password (4+ characters) to secure it." },
+            { status: 400 }
           );
         }
-        if (
-          existing[0].passwordHash &&
-          password &&
-          existing[0].passwordHash !== password
-        ) {
-          return NextResponse.json(
-            { error: "Incorrect password for this username." },
-            { status: 401 }
-          );
-        }
-        return NextResponse.json({ player: existing[0] });
+        const [claimed] = await db
+          .update(players)
+          .set({ passwordHash: hashPassword(password) })
+          .where(eq(players.id, existing.id))
+          .returning();
+        const res = await applyStreak(claimed, Number.isFinite(tzEast) ? tzEast : 0);
+        return NextResponse.json({ player: publicPlayer(res.player), token: issueToken(existing.id), streakInfo: res.streakInfo });
       }
 
-      // Register mode
-      if (existing.length > 0) {
-        return NextResponse.json(
-          { error: "That username is already taken. Try logging in or pick another!" },
-          { status: 400 }
-        );
+      const check = verifyPassword(password, existing.passwordHash);
+      if (!check.ok) {
+        return NextResponse.json({ error: "Incorrect password for this username." }, { status: 401 });
       }
-
-      const [created] = await db
-        .insert(players)
-        .values({
-          username: cleanName,
-          passwordHash: password || "",
-          authProvider: "local",
-          avatarEmoji: avatarEmoji || "🦉",
-          title: "Code Breaker",
-          division: "Bronze",
-          trophies: 0,
-          level: 1,
-          xp: 0,
-          seasonXp: 0,
-          coins: 0,
-          gems: 0,
-          streakDays: 1,
-          wins: 0,
-          losses: 0,
-          totalGames: 0,
-        })
-        .returning();
-
-      return NextResponse.json({ player: created });
+      let row = existing;
+      if (check.needsUpgrade) {
+        const [up] = await db
+          .update(players)
+          .set({ passwordHash: hashPassword(password) })
+          .where(eq(players.id, existing.id))
+          .returning();
+        row = up;
+      }
+      if (adminUsernames().includes(row.username.toLowerCase()) && !row.isAdmin) {
+        const [up] = await db.update(players).set({ isAdmin: true }).where(eq(players.id, row.id)).returning();
+        row = up;
+      }
+      const res = await applyStreak(row, Number.isFinite(tzEast) ? tzEast : 0);
+      return NextResponse.json({ player: publicPlayer(res.player), token: issueToken(existing.id), streakInfo: res.streakInfo });
     }
 
+    /* ---------------------- everything below needs auth ---------------------- */
+    const playerId = verifyToken(body.token || req.headers.get("authorization")?.replace("Bearer ", ""));
     if (!playerId) {
-      return NextResponse.json(
-        { error: "Create or sign in to a profile first" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Please sign in again to continue.", code: "auth" }, { status: 401 });
     }
+    const [player] = await db.select().from(players).where(eq(players.id, playerId)).limit(1);
+    if (!player) return NextResponse.json({ error: "Player not found" }, { status: 404 });
 
-    // Fetch current player for subsequent actions
-    const [player] = await db
-      .select()
-      .from(players)
-      .where(eq(players.id, Number(playerId)));
-
-    if (!player) {
-      return NextResponse.json({ error: "Player not found" }, { status: 404 });
-    }
-
-    // 2. Follow / Unfollow player
-    if (action === "toggle_follow") {
-      const targetId = Number(body.targetId);
-      if (!targetId || targetId === player.id) {
-        return NextResponse.json({ ok: true });
-      }
-      const existing = await db
-        .select()
-        .from(follows)
-        .where(
-          and(
-            eq(follows.followerId, player.id),
-            eq(follows.followingId, targetId)
-          )
-        );
-
-      if (existing.length > 0) {
-        await db.delete(follows).where(eq(follows.id, existing[0].id));
-      } else {
-        await db.insert(follows).values({
-          followerId: player.id,
-          followingId: targetId,
-        });
-      }
+    if (action === "heartbeat") {
+      await db.update(players).set({ isOnline: true, lastSeenAt: new Date() }).where(eq(players.id, player.id));
       return NextResponse.json({ ok: true });
     }
 
-    // 3. Equip Cosmetics & Profile Customization
-    if (action === "update_cosmetics") {
-      const { frameId, themeId, effectId, title, avatarEmoji } = body;
+    if (action === "mark_tutorial") {
+      const grant = player.tutorialSeen ? 0 : 50;
       const [updated] = await db
         .update(players)
-        .set({
-          frameId: frameId ?? player.frameId,
-          themeId: themeId ?? player.themeId,
-          effectId: effectId ?? player.effectId,
-          title: title ?? player.title,
-          avatarEmoji: avatarEmoji ?? player.avatarEmoji,
-        })
+        .set({ tutorialSeen: true, coins: player.coins + grant })
         .where(eq(players.id, player.id))
         .returning();
-      return NextResponse.json({ player: updated });
+      return NextResponse.json({ player: publicPlayer(updated), granted: grant });
     }
 
-    // 4. Buy Cosmetic in Shop
+    /* --------------------------- cosmetics --------------------------- */
+    const applyEquip = (row: PlayerRow, itemId: string) => {
+      const item = getShopItem(itemId);
+      if (!item) return null;
+      const updates: Partial<typeof players.$inferInsert> = {};
+      const avatar = normalizeAvatar(row.avatarConfig);
+      switch (item.category) {
+        case "avatar_base": updates.avatarConfig = { ...avatar, base: item.meta }; break;
+        case "avatar_color": updates.avatarConfig = { ...avatar, color: item.meta }; break;
+        case "avatar_accessory": updates.avatarConfig = { ...avatar, accessory: item.meta }; break;
+        case "frame": updates.frameId = item.id; break;
+        case "theme": updates.themeId = item.id; break;
+        case "effect": updates.effectId = item.id; break;
+        case "title": updates.title = item.meta; break;
+      }
+      return updates;
+    };
+
+    if (action === "equip_cosmetic") {
+      const itemId = String(body.itemId || "");
+      const owned = Array.isArray(player.ownedCosmetics) ? player.ownedCosmetics : [];
+      if (!owned.includes(itemId)) {
+        return NextResponse.json({ error: "You don't own this item yet." }, { status: 400 });
+      }
+      const updates = applyEquip(player, itemId);
+      if (!updates) return NextResponse.json({ error: "Item not found" }, { status: 404 });
+      const [updated] = await db.update(players).set(updates).where(eq(players.id, player.id)).returning();
+      return NextResponse.json({ player: publicPlayer(updated) });
+    }
+
     if (action === "buy_cosmetic") {
-      const { itemId } = body;
-      const item = getAllShopItems().find((i) => i.id === itemId);
-      if (!item) {
-        return NextResponse.json({ error: "Item not found" }, { status: 404 });
-      }
-      const owned = Array.isArray(player.ownedCosmetics)
-        ? [...player.ownedCosmetics]
-        : [];
-      if (owned.includes(itemId)) {
-        return NextResponse.json({ player });
-      }
+      const item = getShopItem(String(body.itemId || ""));
+      if (!item) return NextResponse.json({ error: "Item not found" }, { status: 404 });
+      const owned = Array.isArray(player.ownedCosmetics) ? [...player.ownedCosmetics] : [];
+      if (owned.includes(item.id)) return NextResponse.json({ player: publicPlayer(player) });
 
-      let newCoins = player.coins;
-      let newGems = player.gems;
-
+      let coins = player.coins;
+      let gems = player.gems;
       if (item.priceCoins && item.priceCoins > 0) {
-        if (player.coins < item.priceCoins) {
-          return NextResponse.json(
-            { error: `Need ${item.priceCoins} Clash Coins (you have ${player.coins})` },
-            { status: 400 }
-          );
-        }
-        newCoins -= item.priceCoins;
+        if (coins < item.priceCoins) return NextResponse.json({ error: `Need ${item.priceCoins} coins (you have ${coins}). Win matches to earn more!` }, { status: 400 });
+        coins -= item.priceCoins;
       } else if (item.priceGems && item.priceGems > 0) {
-        if (player.gems < item.priceGems) {
-          return NextResponse.json(
-            { error: `Need ${item.priceGems} Royal Gems (you have ${player.gems})` },
-            { status: 400 }
-          );
-        }
-        newGems -= item.priceGems;
+        if (gems < item.priceGems) return NextResponse.json({ error: `Need ${item.priceGems} gems (you have ${gems}). Complete quests & achievements!` }, { status: 400 });
+        gems -= item.priceGems;
       }
-
-      owned.push(itemId);
-
-      const updates: Partial<typeof players.$inferInsert> = {
-        coins: newCoins,
-        gems: newGems,
-        ownedCosmetics: owned,
-      };
-      if (item.category === "frame") updates.frameId = item.id;
-      if (item.category === "theme") updates.themeId = item.id;
-      if (item.category === "effect") updates.effectId = item.id;
-      if (item.category === "title") updates.title = item.name;
-
+      owned.push(item.id);
+      const equip = applyEquip(player, item.id) || {};
       const [updated] = await db
         .update(players)
-        .set(updates)
+        .set({ coins, gems, ownedCosmetics: owned, ...equip })
         .where(eq(players.id, player.id))
         .returning();
-
-      return NextResponse.json({ player: updated });
+      return NextResponse.json({ player: publicPlayer(updated) });
     }
 
-    // 5. Unlock Premium Season Pass
-    if (action === "unlock_premium_pass") {
-      const costGems = 80;
-      if (player.gems < costGems) {
-        return NextResponse.json(
-          { error: `You need ${costGems} Royal Gems to unlock the Royal Pass (you have ${player.gems}). Win matches & quests to earn Gems!` },
-          { status: 400 }
-        );
-      }
-      const [updated] = await db
-        .update(players)
-        .set({
-          hasPremiumPass: true,
-          gems: player.gems - costGems,
-        })
-        .where(eq(players.id, player.id))
-        .returning();
-      return NextResponse.json({ player: updated });
-    }
-
-    // 6. Claim Season Pass Tier
-    if (action === "claim_pass_tier") {
-      const { tier, isPremium } = body;
-      const tierObj = SEASON_PASS_TIERS.find((t) => t.tier === Number(tier));
-      if (!tierObj) {
-        return NextResponse.json({ error: "Tier not found" }, { status: 404 });
-      }
-      if (player.seasonXp < tierObj.xpRequired) {
-        return NextResponse.json(
-          { error: `Need ${tierObj.xpRequired} Season XP to unlock Tier ${tierObj.tier}` },
-          { status: 400 }
-        );
-      }
-
-      const claimedFree = Array.isArray(player.claimedFreeTiers)
-        ? [...player.claimedFreeTiers]
-        : [];
-      const claimedPrem = Array.isArray(player.claimedPremiumTiers)
-        ? [...player.claimedPremiumTiers]
-        : [];
-      const owned = Array.isArray(player.ownedCosmetics)
-        ? [...player.ownedCosmetics]
-        : [];
-
-      const reward = isPremium ? tierObj.premiumReward : tierObj.freeReward;
-      if (isPremium) {
-        if (!player.hasPremiumPass) {
-          return NextResponse.json(
-            { error: "Unlock the Royal Pass first!" },
-            { status: 400 }
-          );
-        }
-        if (claimedPrem.includes(tierObj.tier)) {
-          return NextResponse.json({ player });
-        }
-        claimedPrem.push(tierObj.tier);
-      } else {
-        if (claimedFree.includes(tierObj.tier)) {
-          return NextResponse.json({ player });
-        }
-        claimedFree.push(tierObj.tier);
-      }
-
-      let newCoins = player.coins;
-      let newGems = player.gems;
-      if (reward.type === "coins" && reward.amount) newCoins += reward.amount;
-      if (reward.type === "gems" && reward.amount) newGems += reward.amount;
-      if (
-        ["frame", "theme", "effect", "title"].includes(reward.type) &&
-        !owned.includes(reward.id)
-      ) {
-        owned.push(reward.id);
-      }
-
-      const [updated] = await db
-        .update(players)
-        .set({
-          coins: newCoins,
-          gems: newGems,
-          ownedCosmetics: owned,
-          claimedFreeTiers: claimedFree,
-          claimedPremiumTiers: claimedPrem,
-        })
-        .where(eq(players.id, player.id))
-        .returning();
-
-      return NextResponse.json({ player: updated });
-    }
-
-    // 7. Claim Daily Quest (Checks real player progress first)
+    /* ---------------------------- quests ----------------------------- */
     if (action === "claim_quest") {
-      const { questId } = body;
-      const quest = DAILY_QUESTS.find((q) => q.id === questId);
-      if (!quest) {
-        return NextResponse.json({ error: "Quest not found" }, { status: 404 });
+      const quest = DAILY_QUESTS.find((q) => q.id === body.questId);
+      if (!quest) return NextResponse.json({ error: "Quest not found" }, { status: 404 });
+      const today = localDateStr(Number.isFinite(tzEast) ? tzEast : 0);
+      const claimKey = `${quest.id}:${today}`;
+      const claimed = Array.isArray(player.claimedDailyQuests) ? [...player.claimedDailyQuests] : [];
+      if (claimed.includes(claimKey)) return NextResponse.json({ player: publicPlayer(player) });
+      const stats = player.dailyStats && player.dailyStats.date === today ? player.dailyStats : emptyDailyStats(today);
+      if ((stats[quest.statKey] || 0) < quest.target) {
+        return NextResponse.json({ error: "Quest not finished yet — keep playing!" }, { status: 400 });
       }
-      const claimed = Array.isArray(player.claimedQuests)
-        ? [...player.claimedQuests]
-        : [];
-      if (claimed.includes(questId)) {
-        return NextResponse.json({ player });
-      }
-
-      // Verify real quest completion
-      const completed =
-        (questId === "quest_play_2" && player.totalGames >= 2) ||
-        (questId === "quest_orders_8" && player.totalGames >= 1) ||
-        (questId === "quest_beat_ai" && player.wins >= 1) ||
-        (questId === "quest_fast_win" &&
-          player.fastestWinTurns !== null &&
-          player.fastestWinTurns <= 6);
-
-      if (!completed) {
-        return NextResponse.json(
-          { error: "Complete the quest requirement in a match first!" },
-          { status: 400 }
-        );
-      }
-
-      claimed.push(questId);
+      claimed.push(claimKey);
       const newXp = player.xp + quest.rewardXp;
-      const newLevel = Math.max(player.level, Math.floor(newXp / 200) + 1);
-
       const [updated] = await db
         .update(players)
         .set({
           coins: player.coins + quest.rewardCoins,
           gems: player.gems + (quest.rewardGems || 0),
           xp: newXp,
-          seasonXp: player.seasonXp + quest.rewardXp,
-          level: newLevel,
-          claimedQuests: claimed,
+          level: Math.max(player.level, Math.floor(newXp / 200) + 1),
+          claimedDailyQuests: claimed.filter((c) => c.endsWith(today) || c === claimKey),
         })
         .where(eq(players.id, player.id))
         .returning();
-
-      return NextResponse.json({ player: updated });
+      return NextResponse.json({ player: publicPlayer(updated) });
     }
 
-    // 8. Join or Create Club (Updates real club member counts & trophies)
-    if (action === "join_club") {
-      const targetClubId = Number(body.clubId);
-      const [updated] = await db
-        .update(players)
-        .set({ clubId: targetClubId })
-        .where(eq(players.id, player.id))
-        .returning();
-
-      // Recalculate club stats from real members
-      const clubMembers = await db
-        .select()
-        .from(players)
-        .where(eq(players.clubId, targetClubId));
-      const totalTrophies = clubMembers.reduce((sum, m) => sum + m.trophies, 0);
-      await db
-        .update(clubs)
-        .set({
-          memberCount: clubMembers.length,
-          totalTrophies,
-        })
-        .where(eq(clubs.id, targetClubId));
-
-      return NextResponse.json({ player: updated });
-    }
-
-    if (action === "create_club") {
-      const { name, tag, badgeEmoji, description } = body;
-      if (!name || !name.trim()) {
-        return NextResponse.json(
-          { error: "Enter a club name" },
-          { status: 400 }
-        );
-      }
-      const [newClub] = await db
-        .insert(clubs)
-        .values({
-          name: name.trim(),
-          tag: (tag || "CLB").toUpperCase().slice(0, 4),
-          badgeEmoji: badgeEmoji || "🛡️",
-          description: description || "Competitive Code Clash club",
-          totalTrophies: player.trophies,
-          memberCount: 1,
-        })
-        .returning();
-
-      const [updated] = await db
-        .update(players)
-        .set({ clubId: newClub.id })
-        .where(eq(players.id, player.id))
-        .returning();
-
-      return NextResponse.json({ player: updated, club: newClub });
-    }
-
-    // 9. Record Real Match Outcome
-    // Heartbeat — keep player online while app is open
-    if (action === "heartbeat") {
-      if (!player) {
-        return NextResponse.json({ error: "Not logged in" }, { status: 401 });
-      }
-      await db
-        .update(players)
-        .set({ isOnline: true, lastSeenAt: new Date() })
-        .where(eq(players.id, player.id));
-      return NextResponse.json({ ok: true, at: new Date().toISOString() });
-    }
-
-    // Sync batch of offline results
-    if (action === "sync_offline_batch") {
-      if (!player) {
-        return NextResponse.json({ error: "Login required" }, { status: 401 });
-      }
-      const results = Array.isArray(body.results) ? body.results : [];
-      let applied = 0;
-      let running = { ...player };
-      for (const r of results.slice(0, 30)) {
-        const won = Boolean(r.won);
-        const trophyDelta = Number(r.trophyDelta || r.trophiesDelta || 20);
-        const coinsEarned = Number(r.coinsEarned || 50);
-        const xpEarned = Number(r.xpEarned || (won ? 100 : 40));
-        const turnsTaken = Number(r.turnsTaken || r.turns || 6);
-        const newTrophies = Math.max(
-          0,
-          running.trophies + (won ? trophyDelta : -Math.floor(trophyDelta * 0.5))
-        );
-        const divInfo = getDivisionForTrophies(newTrophies);
-        const newXp = running.xp + xpEarned;
-        running = {
-          ...running,
-          trophies: newTrophies,
-          division: divInfo.name,
-          xp: newXp,
-          seasonXp: running.seasonXp + xpEarned,
-          level: Math.max(running.level, Math.floor(newXp / 200) + 1),
-          coins: running.coins + coinsEarned,
-          wins: running.wins + (won ? 1 : 0),
-          losses: running.losses + (won ? 0 : 1),
-          totalGames: running.totalGames + 1,
-          fastestWinTurns:
-            won && (!running.fastestWinTurns || turnsTaken < running.fastestWinTurns)
-              ? turnsTaken
-              : running.fastestWinTurns,
-        };
-        applied++;
-      }
-      if (applied > 0) {
-        const [updated] = await db
-          .update(players)
-          .set({
-            trophies: running.trophies,
-            division: running.division,
-            xp: running.xp,
-            seasonXp: running.seasonXp,
-            level: running.level,
-            coins: running.coins,
-            wins: running.wins,
-            losses: running.losses,
-            totalGames: running.totalGames,
-            fastestWinTurns: running.fastestWinTurns,
-            lastSeenAt: new Date(),
-            isOnline: true,
-          })
-          .where(eq(players.id, player.id))
-          .returning();
-        return NextResponse.json({ player: updated, applied });
-      }
-      return NextResponse.json({ player, applied: 0 });
-    }
-
+    /* ------------------------- match results ------------------------- */
     if (action === "record_match_result") {
+      const resultId = String(body.resultId || "");
+      if (resultId) {
+        const inserted = await db
+          .insert(resultLog)
+          .values({ resultId, playerId: player.id })
+          .onConflictDoNothing()
+          .returning();
+        if (inserted.length === 0) {
+          return NextResponse.json({ player: publicPlayer(player), applied: false });
+        }
+      }
 
-      const {
-        won,
-        turnsTaken = 6,
-        trophyDelta = 30,
-        coinsEarned = 85,
-        xpEarned = 120,
-        aiDifficulty,
-      } = body;
+      const won = Boolean(body.won);
+      const turnsTaken = Math.max(1, Math.min(60, Number(body.turnsTaken || 6)));
+      const ordersTotal = Math.max(0, Math.min(240, Number(body.ordersTotal || 0)));
+      const trophyDelta = Math.max(-25, Math.min(60, Number(body.trophyDelta || 0)));
+      const coinsEarned = Math.max(0, Math.min(600, Number(body.coinsEarned || 0)));
+      const xpEarned = Math.max(0, Math.min(600, Number(body.xpEarned || 0)));
+      const aiDifficulty = typeof body.aiDifficulty === "string" ? body.aiDifficulty : undefined;
 
-      const newTrophies = Math.max(
-        0,
-        player.trophies + (won ? trophyDelta : -Math.floor(trophyDelta * 0.5))
-      );
-      const divInfo = getDivisionForTrophies(newTrophies);
+      const today = localDateStr(Number.isFinite(tzEast) ? tzEast : 0);
+      const stats: DailyStats =
+        player.dailyStats && player.dailyStats.date === today ? { ...player.dailyStats } : emptyDailyStats(today);
+      stats.games += 1;
+      stats.orders += ordersTotal;
+      if (won) stats.wins += 1;
+      if (won && turnsTaken <= 6) stats.fastWins += 1;
+
+      let dailyBonus = 0;
+      let dailyDone = player.dailyChallengeDone;
+      if (won && body.dailyChallengeId) {
+        const dc = getDailyChallenge(new Date(Date.now() + (Number.isFinite(tzEast) ? tzEast : 0) * 60000));
+        if (body.dailyChallengeId === dc.id && player.dailyChallengeDone !== dc.dateKey) {
+          dailyBonus = Math.round(120 * dc.bonusMultiplier);
+          dailyDone = dc.dateKey;
+        }
+      }
+
+      const newTrophies = Math.max(0, player.trophies + trophyDelta);
       const newXp = player.xp + xpEarned;
-      const newSeasonXp = player.seasonXp + xpEarned;
-      const newLevel = Math.max(player.level, Math.floor(newXp / 200) + 1);
       const newWins = player.wins + (won ? 1 : 0);
-      const newLosses = player.losses + (won ? 0 : 1);
-      const newTotal = player.totalGames + 1;
-      const fastest =
-        won && (!player.fastestWinTurns || turnsTaken < player.fastestWinTurns)
-          ? turnsTaken
-          : player.fastestWinTurns;
 
-      const achievements = Array.isArray(player.completedAchievements)
-        ? [...player.completedAchievements]
-        : [];
+      const achievements = Array.isArray(player.completedAchievements) ? [...player.completedAchievements] : [];
+      const unlocked: string[] = [];
       let bonusGems = 0;
-
-      if (won && !achievements.includes("first_crack")) {
-        achievements.push("first_crack");
-        bonusGems += 20;
-      }
-      if (won && turnsTaken <= 4 && !achievements.includes("mind_reader")) {
-        achievements.push("mind_reader");
-        bonusGems += 50;
-      }
-      if (won && turnsTaken <= 3 && !achievements.includes("perfect_game")) {
-        achievements.push("perfect_game");
-        bonusGems += 80;
-      }
-      if (
-        won &&
-        aiDifficulty === "Oracle" &&
-        !achievements.includes("oracle_slayer")
-      ) {
-        achievements.push("oracle_slayer");
-        bonusGems += 100;
-      }
-      if (
-        won &&
-        aiDifficulty === "Mastermind" &&
-        !achievements.includes("mastermind_beat")
-      ) {
-        achievements.push("mastermind_beat");
-        bonusGems += 55;
-      }
-      if (newWins >= 10 && !achievements.includes("win_10")) {
-        achievements.push("win_10");
-        bonusGems += 40;
-      }
-      if (newWins >= 50 && !achievements.includes("win_50")) {
-        achievements.push("win_50");
-        bonusGems += 120;
-      }
-      if (newTrophies >= 100 && !achievements.includes("trophies_100")) {
-        achievements.push("trophies_100");
-        bonusGems += 35;
-      }
-      if (newTrophies >= 250 && !achievements.includes("trophies_250")) {
-        achievements.push("trophies_250");
-        bonusGems += 60;
-      }
-      if (newTrophies >= 700 && !achievements.includes("trophies_700")) {
-        achievements.push("trophies_700");
-        bonusGems += 100;
-      }
-      if (newWins >= 100 && !achievements.includes("win_100")) {
-        achievements.push("win_100");
-        bonusGems += 200;
-      }
-      if (newTrophies >= 1000 && !achievements.includes("trophies_1000")) {
-        achievements.push("trophies_1000");
-        bonusGems += 150;
-      }
-      if (newTrophies >= 1900 && !achievements.includes("trophies_1900")) {
-        achievements.push("trophies_1900");
-        bonusGems += 300;
-      }
-      if (won && turnsTaken <= 2 && !achievements.includes("fast_2")) {
-        achievements.push("fast_2");
-        bonusGems += 150;
-      }
+      const check = (cond: boolean, id: string) => {
+        if (cond && !achievements.includes(id)) {
+          achievements.push(id);
+          unlocked.push(id);
+          bonusGems += ACHIEVEMENTS.find((a) => a.id === id)?.rewardGems || 0;
+        }
+      };
+      check(won, "first_crack");
+      check(newWins >= 10, "win_10");
+      check(newWins >= 50, "win_50");
+      check(newWins >= 100, "win_100");
+      check(won && turnsTaken <= 4, "mind_reader");
+      check(won && turnsTaken <= 3, "perfect_game");
+      check(won && turnsTaken === 2, "fast_2");
+      check(won && aiDifficulty === "Mastermind", "mastermind_beat");
+      check(won && aiDifficulty === "Oracle", "oracle_slayer");
+      check(newTrophies >= 100, "trophies_100");
+      check(newTrophies >= 250, "trophies_250");
+      check(newTrophies >= 700, "trophies_700");
+      check(newTrophies >= 1000, "trophies_1000");
+      check(newTrophies >= 1900, "trophies_1900");
 
       const [updated] = await db
         .update(players)
         .set({
           trophies: newTrophies,
-          division: divInfo.name,
+          division: getDivisionForTrophies(newTrophies).name,
           xp: newXp,
-          seasonXp: newSeasonXp,
-          level: newLevel,
-          coins: player.coins + coinsEarned,
+          level: Math.max(player.level, Math.floor(newXp / 200) + 1),
+          coins: player.coins + coinsEarned + dailyBonus,
           gems: player.gems + bonusGems,
           wins: newWins,
-          losses: newLosses,
-          totalGames: newTotal,
-          fastestWinTurns: fastest,
+          losses: player.losses + (won ? 0 : 1),
+          totalGames: player.totalGames + 1,
+          fastestWinTurns: won && (!player.fastestWinTurns || turnsTaken < player.fastestWinTurns) ? turnsTaken : player.fastestWinTurns,
           completedAchievements: achievements,
+          dailyStats: stats,
+          dailyChallengeDone: dailyDone,
           lastSeenAt: new Date(),
+          isOnline: true,
         })
         .where(eq(players.id, player.id))
         .returning();
 
-      // Update player's club trophy total if they belong to one
-      if (updated.clubId) {
-        const clubMembers = await db
-          .select()
-          .from(players)
-          .where(eq(players.clubId, updated.clubId));
-        const totalTrophies = clubMembers.reduce((sum, m) => sum + m.trophies, 0);
-        await db
-          .update(clubs)
-          .set({
-            memberCount: clubMembers.length,
-            totalTrophies,
-          })
-          .where(eq(clubs.id, updated.clubId));
-      }
-
-      return NextResponse.json({ player: updated, bonusGems });
+      return NextResponse.json({ player: publicPlayer(updated), applied: true, unlocked, bonusGems, dailyBonus });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (error) {
     console.error("POST /api/state error:", error);
-    const message =
-      error instanceof Error ? error.message : "Failed to process action";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Failed to process action" }, { status: 500 });
   }
 }

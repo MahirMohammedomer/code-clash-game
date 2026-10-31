@@ -178,6 +178,29 @@ class SoundEngine {
       });
     } catch {}
   }
+  public playDefeat() {
+    try {
+      const ctx = this.getContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      [392, 330, 262].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.12, now + i * 0.18);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.18 + 0.3);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(now + i * 0.18);
+        osc.stop(now + i * 0.18 + 0.32);
+      });
+    } catch {}
+  }
+
+  public playJoin() {
+    this.playTap(660);
+    setTimeout(() => this.playTap(880), 90);
+  }
 }
 
 export const soundEngine = new SoundEngine();

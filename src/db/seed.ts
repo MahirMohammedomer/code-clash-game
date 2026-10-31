@@ -134,6 +134,78 @@ export async function ensureDatabaseReady() {
       );
       CREATE INDEX IF NOT EXISTS idx_match_reactions_room ON public.match_reactions(room_code);
 
+      -- ===== Cipher Clash v3 upgrade (same as supabase/migrations/0003) =====
+      ALTER TABLE public.players
+        ADD COLUMN IF NOT EXISTS avatar_config JSONB NOT NULL DEFAULT '{"base":"owl","color":"classic","accessory":"none"}'::jsonb,
+        ADD COLUMN IF NOT EXISTS claimed_daily_quests JSONB NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS daily_stats JSONB,
+        ADD COLUMN IF NOT EXISTS daily_challenge_done TEXT,
+        ADD COLUMN IF NOT EXISTS last_play_date TEXT,
+        ADD COLUMN IF NOT EXISTS tutorial_seen BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
+
+      UPDATE public.players
+      SET owned_cosmetics = (
+        SELECT jsonb_agg(DISTINCT v)
+        FROM jsonb_array_elements_text(owned_cosmetics || '["base_owl","color_classic","acc_none"]'::jsonb) AS v
+      )
+      WHERE NOT (owned_cosmetics @> '["base_owl"]'::jsonb);
+
+      ALTER TABLE public.matches
+        ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1,
+        ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS player1_avatar_config JSONB,
+        ADD COLUMN IF NOT EXISTS player2_avatar_config JSONB,
+        ADD COLUMN IF NOT EXISTS player1_frame TEXT NOT NULL DEFAULT 'frame_emerald',
+        ADD COLUMN IF NOT EXISTS player2_frame TEXT NOT NULL DEFAULT 'frame_emerald',
+        ADD COLUMN IF NOT EXISTS p1_token TEXT,
+        ADD COLUMN IF NOT EXISTS p2_token TEXT,
+        ADD COLUMN IF NOT EXISTS p1_seen_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS p2_seen_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS end_reason TEXT;
+
+      ALTER TABLE public.chat_messages ADD COLUMN IF NOT EXISTS sender_avatar_config JSONB;
+      ALTER TABLE public.match_reactions ADD COLUMN IF NOT EXISTS sender_slot INTEGER NOT NULL DEFAULT 1;
+
+      CREATE TABLE IF NOT EXISTS public.match_chat_messages (
+        id SERIAL PRIMARY KEY,
+        room_code TEXT NOT NULL,
+        sender_slot INTEGER NOT NULL,
+        sender_name TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.reviews (
+        id SERIAL PRIMARY KEY,
+        player_id INTEGER,
+        username TEXT NOT NULL,
+        rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+        comment TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.feedback (
+        id SERIAL PRIMARY KEY,
+        player_id INTEGER,
+        username TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'other',
+        message TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.result_log (
+        id SERIAL PRIMARY KEY,
+        result_id TEXT NOT NULL UNIQUE,
+        player_id INTEGER NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_matches_waiting ON public.matches(status, is_private, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_match_chat_room ON public.match_chat_messages(room_code, id);
+      CREATE INDEX IF NOT EXISTS idx_reviews_status ON public.reviews(status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_feedback_created ON public.feedback(created_at DESC);
 
       NOTIFY pgrst, 'reload schema';
     `);

@@ -1,29 +1,40 @@
-const CACHE_NAME = "code-clash-pwa-v5";
-const ASSETS = ["/", "/manifest.json", "/icon-192.svg"];
+/* Cipher Clash service worker — network-first for pages & APIs,
+   cache-first for static assets. Bump VERSION to ship updates. */
+const VERSION = "cipher-clash-v3";
+const STATIC_CACHE = `${VERSION}-static`;
+const PAGE_CACHE = `${VERSION}-pages`;
+
+const PRECACHE = ["/manifest.json", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).catch(() => {})
+    caches
+      .open(STATIC_CACHE)
+      .then((cache) => cache.addAll(PRECACHE))
+      .catch(() => {})
+      .then(() => self.skipWaiting())
   );
-  self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((k) => !k.startsWith(VERSION)).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
-  const url = event.request.url;
-  if (event.request.method !== "GET") return;
-  // APIs always network-first
-  if (url.includes("/api/")) {
+  const { request } = event;
+  if (request.method !== "GET") return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // APIs: network only (never serve stale game data)
+  if (url.pathname.startsWith("/api/")) {
     event.respondWith(
-      fetch(event.request).catch(
+      fetch(request).catch(
         () =>
           new Response(JSON.stringify({ error: "offline", offline: true }), {
             status: 503,
@@ -33,15 +44,36 @@ self.addEventListener("fetch", (event) => {
     );
     return;
   }
+
+  // Static build assets & icons: cache-first
+  if (
+    url.pathname.startsWith("/_next/static/") ||
+    /\.(png|jpg|jpeg|svg|webp|ico|woff2?)$/.test(url.pathname)
+  ) {
+    event.respondWith(
+      caches.match(request).then(
+        (cached) =>
+          cached ||
+          fetch(request).then((res) => {
+            const copy = res.clone();
+            caches.open(STATIC_CACHE).then((c) => c.put(request, copy));
+            return res;
+          })
+      )
+    );
+    return;
+  }
+
+  // Pages: network-first, cache fallback (offline support)
   event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        if (response && response.status === 200 && response.type === "basic") {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+    fetch(request)
+      .then((res) => {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(PAGE_CACHE).then((c) => c.put(request, copy));
         }
-        return response;
+        return res;
       })
-      .catch(() => caches.match(event.request).then((r) => r || caches.match("/")))
+      .catch(() => caches.match(request).then((r) => r || caches.match("/")))
   );
 });

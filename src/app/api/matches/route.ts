@@ -2,288 +2,476 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { matches, MatchGuessEntry } from "@/db/schema";
 import { ensureDatabaseReady } from "@/db/seed";
-import { eq, desc } from "drizzle-orm";
-import {
-  evaluateGuess,
-  isValidSecretCode,
-} from "@/lib/game-engine";
+import { eq, and, desc, isNull, gt } from "drizzle-orm";
+import { evaluateGuess, isValidSecretCode } from "@/lib/game-engine";
+import { normalizeAvatar, DEFAULT_AVATAR } from "@/lib/avatar";
+import { randomToken } from "@/lib/auth-server";
+import { sanitizeText } from "@/lib/security";
+
+type MatchRow = typeof matches.$inferSelect;
+
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function makeRoomCode(): string {
+  let s = "";
+  for (let i = 0; i < 6; i++) s += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  return s;
+}
+
+function cleanCode(raw: unknown): string {
+  return String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/** Strip secrets & tokens before sending a match anywhere. */
+function safeMatch(m: MatchRow, viewerSlot?: 1 | 2) {
+  return {
+    id: m.id,
+    roomCode: m.roomCode,
+    mode: m.mode,
+    status: m.status,
+    timerSeconds: m.timerSeconds,
+    version: m.version,
+    player1Id: m.player1Id,
+    player1Name: m.player1Name,
+    player1Avatar: normalizeAvatar(m.player1AvatarConfig || DEFAULT_AVATAR),
+    player1Frame: m.player1Frame || "frame_emerald",
+    player1Division: m.player1Division,
+    player2Id: m.player2Id,
+    player2Name: m.player2Name,
+    player2Avatar: normalizeAvatar(m.player2AvatarConfig || DEFAULT_AVATAR),
+    player2Frame: m.player2Frame || "frame_emerald",
+    player2Division: m.player2Division,
+    hasSecret1: isValidSecretCode(m.player1Secret || ""),
+    hasSecret2: isValidSecretCode(m.player2Secret || ""),
+    hasPlayer2: Boolean(m.p2Token),
+    currentTurn: (m.currentTurn === 2 ? 2 : 1) as 1 | 2,
+    turnStartedAt: new Date(m.turnStartedAt).toISOString(),
+    guesses: Array.isArray(m.guesses) ? m.guesses : [],
+    winnerSlot: m.winnerSlot,
+    winnerName: m.winnerName,
+    endReason: m.endReason,
+    p1SeenAt: m.p1SeenAt ? new Date(m.p1SeenAt).toISOString() : null,
+    p2SeenAt: m.p2SeenAt ? new Date(m.p2SeenAt).toISOString() : null,
+    yourSecret:
+      viewerSlot === 1 ? m.player1Secret || "" : viewerSlot === 2 ? m.player2Secret || "" : undefined,
+    serverNow: new Date().toISOString(),
+    createdAt: new Date(m.createdAt).toISOString(),
+  };
+}
+
+function slotForToken(m: MatchRow, token: string): 1 | 2 | null {
+  if (!token) return null;
+  if (m.p1Token && token === m.p1Token) return 1;
+  if (m.p2Token && token === m.p2Token) return 2;
+  return null;
+}
+
+async function touchSeen(m: MatchRow, slot: 1 | 2) {
+  const last = slot === 1 ? m.p1SeenAt : m.p2SeenAt;
+  if (last && Date.now() - new Date(last).getTime() < 2000) return;
+  const set = slot === 1 ? { p1SeenAt: new Date() } : { p2SeenAt: new Date() };
+  await db.update(matches).set(set).where(eq(matches.id, m.id)).catch(() => {});
+}
+
+async function getByCode(code: string): Promise<MatchRow | null> {
+  const rows = await db.select().from(matches).where(eq(matches.roomCode, code)).limit(1);
+  return rows[0] || null;
+}
+
+function deriveStatus(m: { player1Secret?: string | null; player2Secret?: string | null; p2Token?: string | null; status: string }): string {
+  if (m.status === "finished" || m.status === "abandoned") return m.status;
+  const s1 = isValidSecretCode(m.player1Secret || "");
+  const s2 = isValidSecretCode(m.player2Secret || "");
+  if (s1 && s2) return "playing";
+  return m.p2Token ? "setup" : "waiting";
+}
+
+/* ---------------------------------- GET --------------------------------- */
 
 export async function GET(req: NextRequest) {
   try {
     await ensureDatabaseReady();
     const { searchParams } = new URL(req.url);
-    const roomCode = searchParams.get("roomCode");
+    const code = cleanCode(searchParams.get("roomCode"));
+    if (!code) return NextResponse.json({ match: null });
 
-    if (roomCode) {
-      const [match] = await db
-        .select()
-        .from(matches)
-        .where(eq(matches.roomCode, roomCode.toUpperCase()));
-      if (!match) return NextResponse.json({ match: null });
-      // Never expose secrets in general fetch — only during active play with proper slot
-      const safe = {
-        ...match,
-        player1Secret: "",
-        player2Secret: "",
-      };
-      return NextResponse.json({ match: safe });
+    const m = await getByCode(code);
+    if (!m) return NextResponse.json({ match: null });
+
+    const token = searchParams.get("token") || "";
+    const slot = slotForToken(m, token);
+    if (slot) await touchSeen(m, slot);
+
+    const knownVersion = Number(searchParams.get("v") || 0);
+    if (knownVersion && knownVersion === m.version && m.status !== "finished") {
+      return NextResponse.json({
+        match: { roomCode: m.roomCode, version: m.version, unchanged: true },
+        presence: {
+          p1SeenAt: m.p1SeenAt ? new Date(m.p1SeenAt).toISOString() : null,
+          p2SeenAt: m.p2SeenAt ? new Date(m.p2SeenAt).toISOString() : null,
+          serverNow: new Date().toISOString(),
+        },
+      });
     }
 
-    const recentMatches = await db
-      .select()
-      .from(matches)
-      .orderBy(desc(matches.createdAt))
-      .limit(20);
-
-    const safeList = recentMatches.map((m) => ({
-      ...m,
-      player1Secret: "",
-      player2Secret: "",
-    }));
-
-    return NextResponse.json({ matches: safeList });
+    return NextResponse.json({ match: safeMatch(m, slot || undefined) });
   } catch (error) {
     console.error("GET /api/matches error:", error);
-    return NextResponse.json({ error: "Failed to load matches" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to load match" }, { status: 500 });
   }
 }
+
+/* ---------------------------------- POST -------------------------------- */
 
 export async function POST(req: NextRequest) {
   try {
     await ensureDatabaseReady();
-    const body = await req.json();
-    const { action } = body;
+    const body = await req.json().catch(() => ({}));
+    const action = body.action as string;
 
-    // 1. Create a Real Challenge / Match Room (Online 1v1 or Local 2-Phone)
-    if (action === "create_room") {
-      const {
-        mode = "online_1v1",
-        timerSeconds = 45,
-        player1Id,
-        player1Name,
-        player1Avatar = "🦉",
-        player1Division = "Bronze",
-        player1Secret = "",
-        targetOpponentName,
-        targetOpponentAvatar,
-        targetOpponentDivision,
-        customRoomCode,
-      } = body;
+    /* --------------------------- create room --------------------------- */
+    if (action === "create_room" || action === "quick_match") {
+      const name = sanitizeText(body.name || "Player", 16) || "Player";
+      const avatar = normalizeAvatar(body.avatar);
+      const frame = String(body.frame || "frame_emerald").slice(0, 40);
+      const division = sanitizeText(body.division || "Bronze", 20);
+      const playerId = body.playerId ? Number(body.playerId) : null;
+      const secret = isValidSecretCode(body.secret || "") ? body.secret : "";
+      const timerSeconds = [15, 30, 45, 60, 90].includes(Number(body.timerSeconds)) ? Number(body.timerSeconds) : 45;
 
-      if (!player1Name) {
-        return NextResponse.json(
-          { error: "Player name is required to host a room" },
-          { status: 400 }
-        );
+      // Quick match: first try to claim an open public room as Player 2.
+      if (action === "quick_match") {
+        const cutoff = new Date(Date.now() - 10 * 60 * 1000);
+        const open = await db
+          .select()
+          .from(matches)
+          .where(
+            and(
+              eq(matches.status, "waiting"),
+              eq(matches.isPrivate, false),
+              isNull(matches.p2Token),
+              gt(matches.createdAt, cutoff)
+            )
+          )
+          .orderBy(desc(matches.createdAt))
+          .limit(5);
+
+        for (const room of open) {
+          // skip stale hosts (not seen in 30s) — and never join your own room
+          if (room.player1Id && playerId && room.player1Id === playerId) continue;
+          if (room.p1SeenAt && Date.now() - new Date(room.p1SeenAt).getTime() > 30000) continue;
+          const token = randomToken(20);
+          const status = isValidSecretCode(room.player1Secret || "") && isValidSecretCode(secret) ? "playing" : "setup";
+          const claimed = await db
+            .update(matches)
+            .set({
+              player2Id: playerId,
+              player2Name: name,
+              player2AvatarConfig: avatar,
+              player2Frame: frame,
+              player2Division: division,
+              player2Secret: secret,
+              p2Token: token,
+              p2SeenAt: new Date(),
+              status,
+              version: room.version + 1,
+              turnStartedAt: new Date(),
+            })
+            .where(and(eq(matches.id, room.id), isNull(matches.p2Token)))
+            .returning();
+          if (claimed[0]) {
+            return NextResponse.json({ match: safeMatch(claimed[0], 2), slot: 2, token, joined: true });
+          }
+        }
+        // fall through: create a room and wait
       }
 
-      const prefix = mode === "local_offline" ? "LOCAL" : "ROOM";
-      const roomCode =
-        customRoomCode?.toUpperCase() ||
-        `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const isPrivate = action === "create_room" ? Boolean(body.isPrivate) : false;
+      const token = randomToken(20);
 
-      const [created] = await db
-        .insert(matches)
-        .values({
-          roomCode,
-          mode,
-          status: "waiting",
-          timerSeconds: Number(timerSeconds),
-          player1Id: player1Id ? Number(player1Id) : null,
-          player1Name,
-          player1Avatar,
-          player1Division,
-          player1Secret: isValidSecretCode(player1Secret) ? player1Secret : "",
-          player2Name: targetOpponentName || "Waiting for Player 2...",
-          player2Avatar: targetOpponentAvatar || "⚔️",
-          player2Division: targetOpponentDivision || "Bronze",
-          player2Secret: "",
-          currentTurn: 1,
-          guesses: [],
-        })
-        .returning();
-
-      return NextResponse.json({ match: created });
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const roomCode = makeRoomCode();
+        try {
+          const [created] = await db
+            .insert(matches)
+            .values({
+              roomCode,
+              mode: "online_1v1",
+              status: "waiting",
+              timerSeconds,
+              isPrivate,
+              version: 1,
+              player1Id: playerId,
+              player1Name: name,
+              player1AvatarConfig: avatar,
+              player1Frame: frame,
+              player1Division: division,
+              player1Secret: secret,
+              p1Token: token,
+              p1SeenAt: new Date(),
+              player2Name: "Waiting for rival...",
+              currentTurn: 1,
+              guesses: [],
+              turnStartedAt: new Date(),
+            })
+            .returning();
+          return NextResponse.json({ match: safeMatch(created, 1), slot: 1, token, joined: false });
+        } catch {
+          // room code collision — retry
+        }
+      }
+      return NextResponse.json({ error: "Could not create a room. Try again!" }, { status: 500 });
     }
 
-    // 2. Join an existing Room (by roomCode) as Player 2
+    /* ---------------------------- join room ---------------------------- */
     if (action === "join_room") {
-      const {
-        roomCode,
-        player2Id,
-        player2Name,
-        player2Avatar = "🦊",
-        player2Division = "Bronze",
-        player2Secret = "",
-      } = body;
+      const code = cleanCode(body.roomCode);
+      const m = await getByCode(code);
+      if (!m) return NextResponse.json({ error: "Room not found. Double-check the code!" }, { status: 404 });
+      if (m.status === "abandoned") return NextResponse.json({ error: "This room was closed." }, { status: 410 });
 
-      const cleanCode = (roomCode || "").trim().toUpperCase();
-      const [existing] = await db
-        .select()
-        .from(matches)
-        .where(eq(matches.roomCode, cleanCode));
-
-      if (!existing) {
-        return NextResponse.json(
-          { error: "Room code not found. Check the code and try again!" },
-          { status: 404 }
-        );
+      // Reconnect: token matches an existing slot
+      const existingSlot = slotForToken(m, String(body.token || ""));
+      if (existingSlot) {
+        await touchSeen(m, existingSlot);
+        return NextResponse.json({ match: safeMatch(m, existingSlot), slot: existingSlot, token: body.token, reconnected: true });
       }
 
-      const nextSecret2 = isValidSecretCode(player2Secret)
-        ? player2Secret
-        : existing.player2Secret;
+      if (m.p2Token) {
+        return NextResponse.json({ error: "This room is already full." }, { status: 409 });
+      }
+      if (m.status === "finished") {
+        return NextResponse.json({ error: "That match already finished." }, { status: 410 });
+      }
 
-      const bothSecretsReady =
-        isValidSecretCode(existing.player1Secret) &&
-        isValidSecretCode(nextSecret2);
+      const name = sanitizeText(body.name || "Player", 16) || "Player";
+      const avatar = normalizeAvatar(body.avatar);
+      const secret = isValidSecretCode(body.secret || "") ? body.secret : "";
+      const token = randomToken(20);
+      const status = isValidSecretCode(m.player1Secret || "") && isValidSecretCode(secret) ? "playing" : "setup";
 
-      const [updated] = await db
+      const claimed = await db
         .update(matches)
         .set({
-          status: bothSecretsReady ? "playing" : "setup",
-          player2Id: player2Id ? Number(player2Id) : existing.player2Id,
-          player2Name: player2Name || existing.player2Name,
-          player2Avatar: player2Avatar || existing.player2Avatar,
-          player2Division: player2Division || existing.player2Division,
-          player2Secret: nextSecret2,
+          player2Id: body.playerId ? Number(body.playerId) : null,
+          player2Name: name,
+          player2AvatarConfig: avatar,
+          player2Frame: String(body.frame || "frame_emerald").slice(0, 40),
+          player2Division: sanitizeText(body.division || "Bronze", 20),
+          player2Secret: secret,
+          p2Token: token,
+          p2SeenAt: new Date(),
+          status,
+          version: m.version + 1,
           turnStartedAt: new Date(),
         })
-        .where(eq(matches.id, existing.id))
+        .where(and(eq(matches.id, m.id), isNull(matches.p2Token)))
         .returning();
 
-      return NextResponse.json({ match: updated });
+      if (!claimed[0]) return NextResponse.json({ error: "Someone just took the last seat!" }, { status: 409 });
+      return NextResponse.json({ match: safeMatch(claimed[0], 2), slot: 2, token, joined: true });
     }
 
-    // 3. Lock in Secret Code for Player 1 or Player 2 in a Room
+    /* --------------------- everything below: token auth --------------------- */
+    const code = cleanCode(body.roomCode);
+    const m = await getByCode(code);
+    if (!m) return NextResponse.json({ error: "Match not found" }, { status: 404 });
+    const slot = slotForToken(m, String(body.token || ""));
+    if (!slot) return NextResponse.json({ error: "You are not a player in this match.", code: "slot" }, { status: 403 });
+    await touchSeen(m, slot);
+
+    /* ---------------------------- set secret ---------------------------- */
     if (action === "set_secret") {
-      const { roomCode, playerSlot, secret } = body;
+      const secret = String(body.secret || "");
       if (!isValidSecretCode(secret)) {
-        return NextResponse.json(
-          { error: "Secret code must be 4 unique digits from 1-9" },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: "Secret must be 4 unique digits from 1-9." }, { status: 400 });
       }
-
-      const [existing] = await db
-        .select()
-        .from(matches)
-        .where(eq(matches.roomCode, (roomCode || "").toUpperCase()));
-
-      if (!existing) {
-        return NextResponse.json({ error: "Room not found" }, { status: 404 });
+      if (m.status === "playing" || m.status === "finished") {
+        return NextResponse.json({ match: safeMatch(m, slot) });
       }
-
-      const slot: 1 | 2 = playerSlot === 2 ? 2 : 1;
-      const nextP1Secret = slot === 1 ? secret : existing.player1Secret;
-      const nextP2Secret = slot === 2 ? secret : existing.player2Secret;
-      const bothReady =
-        isValidSecretCode(nextP1Secret) && isValidSecretCode(nextP2Secret);
-
+      const next1 = slot === 1 ? secret : m.player1Secret;
+      const next2 = slot === 2 ? secret : m.player2Secret;
+      const status = deriveStatus({ player1Secret: next1, player2Secret: next2, p2Token: m.p2Token, status: m.status });
       const [updated] = await db
         .update(matches)
         .set({
-          player1Secret: nextP1Secret,
-          player2Secret: nextP2Secret,
-          status: bothReady ? "playing" : existing.status === "waiting" ? "waiting" : "setup",
-          turnStartedAt: new Date(),
+          player1Secret: next1,
+          player2Secret: next2,
+          status,
+          version: m.version + 1,
+          turnStartedAt: status === "playing" ? new Date() : m.turnStartedAt,
         })
-        .where(eq(matches.id, existing.id))
+        .where(eq(matches.id, m.id))
         .returning();
-
-      return NextResponse.json({ match: updated });
+      return NextResponse.json({ match: safeMatch(updated, slot) });
     }
 
-    // 4. Submit a Real Guess or Timeout in a Room
+    /* ---------------------------- submit turn --------------------------- */
     if (action === "submit_turn") {
-      const { roomCode, playerSlot, guess, isTimeout = false } = body;
-      const [match] = await db
-        .select()
-        .from(matches)
-        .where(eq(matches.roomCode, (roomCode || "").toUpperCase()));
-
-      if (!match) {
-        return NextResponse.json({ error: "Match not found" }, { status: 404 });
-      }
-      if (match.status === "finished") {
-        return NextResponse.json({ match });
+      if (m.status === "finished") return NextResponse.json({ match: safeMatch(m, slot) });
+      if (m.status !== "playing") {
+        return NextResponse.json({ error: "The match hasn't started yet.", match: safeMatch(m, slot) }, { status: 409 });
       }
 
-      const slot: 1 | 2 = playerSlot === 2 ? 2 : 1;
-      const targetSecret = slot === 1 ? match.player2Secret : match.player1Secret;
-
-      if (!isTimeout && !isValidSecretCode(targetSecret)) {
-        return NextResponse.json(
-          { error: "Waiting for your opponent to lock in their secret 4-digit code first!" },
-          { status: 400 }
-        );
+      const guesses: MatchGuessEntry[] = Array.isArray(m.guesses) ? [...m.guesses] : [];
+      const guessId = String(body.guessId || "");
+      if (guessId && guesses.some((g) => g.id === guessId)) {
+        return NextResponse.json({ match: safeMatch(m, slot), duplicate: true });
       }
 
-      const currentGuesses: MatchGuessEntry[] = Array.isArray(match.guesses)
-        ? [...match.guesses]
-        : [];
+      const currentSlot: 1 | 2 = m.currentTurn === 2 ? 2 : 1;
+      const isTimeout = Boolean(body.isTimeout);
 
-      const turnNum =
-        currentGuesses.filter((g) => g.playerSlot === slot).length + 1;
+      if (isTimeout) {
+        // Either player may end an expired turn — but only if it really expired.
+        if (m.timerSeconds > 0) {
+          const elapsed = Date.now() - new Date(m.turnStartedAt).getTime();
+          if (elapsed < m.timerSeconds * 1000 + 1500) {
+            return NextResponse.json({ error: "Turn hasn't expired yet.", match: safeMatch(m, slot) }, { status: 409 });
+          }
+        } else if (slot !== currentSlot) {
+          return NextResponse.json({ error: "Not your turn.", match: safeMatch(m, slot) }, { status: 409 });
+        }
+      } else if (slot !== currentSlot) {
+        return NextResponse.json({ error: "Not your turn yet!", match: safeMatch(m, slot) }, { status: 409 });
+      }
 
-      let points = 0;
-      let orders = 0;
-      let isWin = false;
+      if (body.version && Number(body.version) !== m.version) {
+        return NextResponse.json({ error: "Game state changed — resyncing.", match: safeMatch(m, slot) }, { status: 409 });
+      }
 
+      const actorSlot: 1 | 2 = isTimeout ? currentSlot : slot;
+      const targetSecret = actorSlot === 1 ? m.player2Secret : m.player1Secret;
+      const guess = String(body.guess || "");
+
+      let points = 0, orders = 0, isWin = false;
       if (!isTimeout) {
-        const res = evaluateGuess(targetSecret, guess);
-        points = res.points;
-        orders = res.orders;
-        isWin = res.isWin;
+        if (!isValidSecretCode(guess)) {
+          return NextResponse.json({ error: "Guess must be 4 unique digits from 1-9." }, { status: 400 });
+        }
+        const res = evaluateGuess(targetSecret || "", guess);
+        points = res.points; orders = res.orders; isWin = res.isWin;
       }
 
       const entry: MatchGuessEntry = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        playerSlot: slot,
-        playerName: slot === 1 ? match.player1Name : match.player2Name,
+        id: guessId || `g-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        playerSlot: actorSlot,
+        playerName: actorSlot === 1 ? m.player1Name : m.player2Name,
         guess: isTimeout ? "TIMEOUT" : guess,
         points,
         orders,
-        isTimeout: Boolean(isTimeout),
-        turnNumber: turnNum,
+        isTimeout,
+        turnNumber: guesses.filter((g) => g.playerSlot === actorSlot).length + 1,
         timestamp: new Date().toISOString(),
       };
+      guesses.push(entry);
 
-      currentGuesses.push(entry);
-
-      let newStatus = match.status;
-      let winnerSlot = match.winnerSlot;
-      let winnerName = match.winnerName;
-      const nextTurn: 1 | 2 = slot === 1 ? 2 : 1;
+      let status = m.status;
+      let winnerSlot = m.winnerSlot;
+      let winnerName = m.winnerName;
+      let endReason = m.endReason;
 
       if (isWin) {
-        newStatus = "finished";
-        winnerSlot = slot;
-        winnerName = slot === 1 ? match.player1Name : match.player2Name;
+        status = "finished";
+        winnerSlot = actorSlot;
+        winnerName = entry.playerName;
+        endReason = "cracked";
+      } else if (isTimeout) {
+        // 3 timeouts in a row (of your own turns) = AFK forfeit
+        const mine = guesses.filter((g) => g.playerSlot === actorSlot).slice(-3);
+        if (mine.length === 3 && mine.every((g) => g.isTimeout)) {
+          status = "finished";
+          winnerSlot = actorSlot === 1 ? 2 : 1;
+          winnerName = winnerSlot === 1 ? m.player1Name : m.player2Name;
+          endReason = "afk";
+        }
       }
 
       const [updated] = await db
         .update(matches)
         .set({
-          guesses: currentGuesses,
-          status: newStatus,
+          guesses,
+          status,
           winnerSlot,
           winnerName,
-          currentTurn: nextTurn,
+          endReason,
+          currentTurn: actorSlot === 1 ? 2 : 1,
           turnStartedAt: new Date(),
+          version: m.version + 1,
         })
-        .where(eq(matches.id, match.id))
+        .where(and(eq(matches.id, m.id), eq(matches.version, m.version)))
         .returning();
 
-      return NextResponse.json({ match: updated });
+      if (!updated) {
+        const fresh = await getByCode(code);
+        return NextResponse.json({ match: fresh ? safeMatch(fresh, slot) : safeMatch(m, slot) });
+      }
+      return NextResponse.json({ match: safeMatch(updated, slot) });
+    }
+
+    /* ------------------------------ forfeit ------------------------------ */
+    if (action === "forfeit") {
+      if (m.status === "finished") return NextResponse.json({ match: safeMatch(m, slot) });
+      const hasOpponent = Boolean(m.p2Token);
+      const [updated] = await db
+        .update(matches)
+        .set(
+          hasOpponent && (m.status === "playing" || m.status === "setup")
+            ? {
+                status: "finished",
+                winnerSlot: slot === 1 ? 2 : 1,
+                winnerName: slot === 1 ? m.player2Name : m.player1Name,
+                endReason: "forfeit",
+                version: m.version + 1,
+              }
+            : { status: "abandoned", endReason: "left", version: m.version + 1 }
+        )
+        .where(eq(matches.id, m.id))
+        .returning();
+      return NextResponse.json({ match: safeMatch(updated, slot) });
+    }
+
+    /* ------------------------ claim disconnect win ------------------------ */
+    if (action === "claim_disconnect_win") {
+      if (m.status === "finished" || m.status === "abandoned") {
+        return NextResponse.json({ match: safeMatch(m, slot) });
+      }
+      const oppSeen = slot === 1 ? m.p2SeenAt : m.p1SeenAt;
+      const ageMs = Date.now() - new Date(m.createdAt).getTime();
+      const silentMs = oppSeen ? Date.now() - new Date(oppSeen).getTime() : ageMs;
+
+      if (m.status === "playing") {
+        if (silentMs < 25000) {
+          return NextResponse.json({ error: "Your rival is still connected.", match: safeMatch(m, slot) }, { status: 409 });
+        }
+        const [updated] = await db
+          .update(matches)
+          .set({
+            status: "finished",
+            winnerSlot: slot,
+            winnerName: slot === 1 ? m.player1Name : m.player2Name,
+            endReason: "disconnect",
+            version: m.version + 1,
+          })
+          .where(eq(matches.id, m.id))
+          .returning();
+        return NextResponse.json({ match: safeMatch(updated, slot) });
+      }
+
+      // waiting/setup: just close the room, no winner
+      if (silentMs < 20000 && m.p2Token) {
+        return NextResponse.json({ error: "Give them a few more seconds.", match: safeMatch(m, slot) }, { status: 409 });
+      }
+      const [updated] = await db
+        .update(matches)
+        .set({ status: "abandoned", endReason: "no_show", version: m.version + 1 })
+        .where(eq(matches.id, m.id))
+        .returning();
+      return NextResponse.json({ match: safeMatch(updated, slot) });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (error) {
     console.error("POST /api/matches error:", error);
-    return NextResponse.json(
-      { error: "Failed to process match action" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to process match action" }, { status: 500 });
   }
 }
