@@ -22,8 +22,6 @@ import DynamicProfileModal, {
   PlayerRecord,
   getFrameClasses,
 } from "@/components/DynamicProfileModal";
-import Feedback from "@/components/Feedback";
-import BotMascot from "@/components/BotMascot";
 import ChatPanel from "@/components/ChatPanel";
 import MatchSideChat from "@/components/MatchSideChat";
 import MatchReplay from "@/components/MatchReplay";
@@ -158,7 +156,6 @@ export default function CodeClashApp() {
   const [tournaments, setTournaments] = useState<TournamentRecord[]>([]);
   const [supabaseReady, setSupabaseReady] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
-  const [shopFilter, setShopFilter] = useState("all");
   const [deferredInstall, setDeferredInstall] = useState<any>(null);
   const [isOnlineNet, setIsOnlineNet] = useState(true);
   const dailyChallenge = getDailyChallenge();
@@ -346,7 +343,7 @@ export default function CodeClashApp() {
       if (data.player) {
         // Guests: save only to local session, never store null id as real id
         if (data.player.id == null || data.player.isGuest) {
-          saveSession({ id: null, username: data.player.username, avatarEmoji: data.player.avatarEmoji || "🦉", isGuest: true });
+          createGuestSession(data.player.username);
         } else if (typeof window !== "undefined") {
           window.localStorage.setItem(
             "code_clash_player_id",
@@ -489,7 +486,6 @@ export default function CodeClashApp() {
       if (data.match) {
         setArenaMode(mode);
         setActiveRoomCode(data.match.roomCode);
-        setSelectedTimer(data.match.timerSeconds);
         setArenaOpponentName(data.match.player1Name);
         setArenaOpponentAvatar(data.match.player1Avatar || "🦉");
         setIsPlayer2Seat(true);
@@ -842,7 +838,7 @@ export default function CodeClashApp() {
         if (isGuest) {
           // Guests stay local only
           window.localStorage.removeItem("code_clash_player_id");
-          saveSession({ id: null, username: data.player.username, avatarEmoji: data.player.avatarEmoji || "🦉", isGuest: true });
+          createGuestSession(data.player.username);
         } else {
           window.localStorage.setItem(
             "code_clash_player_id",
@@ -1251,60 +1247,8 @@ export default function CodeClashApp() {
         </div>
       )}
 
-      {!inArena && (
-      <nav className="game-nav" aria-label="Game sections">
-        <div >
-          {[
-            { id: "play", label: "Play", icon: Swords, color: "#58CC02" },
-            { id: "rank", label: "Rank & Pass", icon: Crown, color: "#FFC800" },
-            {
-              id: "tournaments",
-              label: "Tourneys",
-              icon: Trophy,
-              color: "#FF9600",
-            },
-            { id: "social", label: "Social", icon: Users, color: "#1CB0F6" },
-            {
-              id: "shop",
-              label: "Quests & Shop",
-              icon: Sparkles,
-              color: "#CE82FF",
-            },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isSelected = activeNav === tab.id && !inArena;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  soundEngine.playTap(500);
-                  setInArena(false);
-                  setActiveNav(
-                    tab.id as
-                      | "play"
-                      | "rank"
-                      | "tournaments"
-                      | "social"
-                      | "shop"
-                  );
-                }}
-                aria-current={isSelected ? "page" : undefined}
-              >
-                <Icon
-                  className="w-4 h-4"
-                  style={{ color: isSelected ? tab.color : undefined }}
-                />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
-
-      )}
-
       {/* MAIN CONTAINER */}
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 pt-4 pb-12 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <main className="flex-1 max-w-5xl w-full mx-auto px-4 pt-4 pb-28 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* LEFT / PRIMARY COLUMN */}
         <div className="lg:col-span-7 space-y-5">
           {inArena ? (
@@ -1426,7 +1370,6 @@ export default function CodeClashApp() {
               {/* TAB 1: GUIDED PLAY HUB */}
               {activeNav === "play" && (
                 <div className="space-y-5 animate-pop-in">
-                  <section className="game-hero"><div className="hero-orb" aria-hidden="true"/><div className="relative z-10"><span className="text-xs font-black uppercase tracking-widest text-emerald-200">The code-breaking arena</span><h1>Think fast.<br/>Crack the code.</h1><p>Pick a rival, choose four digits, and use the clues to win. New here? Start with Rookie below.</p><button onClick={() => handleStartAIMatch("Rookie")} className="mt-5 rounded-xl bg-[#a8f06d] px-5 py-3 text-sm font-black text-[#17372a] shadow-md">Play your first game →</button><button onClick={() => setShowHowToPlay(true)} className="ml-3 mt-5 text-sm font-bold text-white underline">How to play</button></div></section>
                   {/* Network + Install strip */}
                   <div className="flex flex-wrap items-center gap-2">
                     <span
@@ -1445,9 +1388,9 @@ export default function CodeClashApp() {
                         onClick={async () => {
                           try {
                             deferredInstall.prompt();
-                            const choice = await deferredInstall.userChoice;
+                            await deferredInstall.userChoice;
                             setDeferredInstall(null);
-                            if (choice.outcome === "accepted") showToast("Installation started!");
+                            showToast("📲 App installed — play offline anytime!");
                           } catch {}
                         }}
                         className="px-3 py-1.5 rounded-full bg-[#1CB0F6] text-white text-[11px] font-extrabold border-b-3 border-[#1899D6] btn-tactile"
@@ -1673,7 +1616,7 @@ export default function CodeClashApp() {
                                   className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 text-white shadow-xs"
                                   style={{ backgroundColor: bot.color }}
                                 >
-                                  <BotMascot difficulty={diff} />
+                                  {bot.emoji}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5">
@@ -2850,12 +2793,10 @@ export default function CodeClashApp() {
                       </p>
                     </div>
 
-                    <div className="flex gap-2 flex-wrap" aria-label="Shop categories">{["all", "frame", "theme", "effect", "title"].map(category => <button key={category} onClick={() => setShopFilter(category)} className={`px-3 py-2 rounded-xl text-xs font-bold capitalize ${shopFilter === category ? "bg-[#2B2D42] text-white" : "bg-[#F3F0E6] text-[#2B2D42]"}`}>{category}</button>)}</div>
-
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {getAllShopItems().filter(item => shopFilter === "all" || item.category === shopFilter).map((item) => {
+                      {getAllShopItems().map((item) => {
                         const owned =
-                          (!item.priceCoins && !item.priceGems) ||
+                          item.priceCoins === 0 ||
                           (currentPlayer?.ownedCosmetics || []).includes(
                             item.id
                           );
@@ -3123,6 +3064,66 @@ export default function CodeClashApp() {
         </aside>
       </main>
 
+      {/* BOTTOM 5-TAB NAVIGATION DOCK */}
+      <nav className="fixed bottom-0 inset-x-0 z-40 bg-[#FFFDF7]/95 backdrop-blur-md border-t-2 border-[#E5E0D5]">
+        <div className="max-w-xl mx-auto px-3 h-20 flex items-center justify-around gap-1">
+          {[
+            { id: "play", label: "Play", icon: Swords, color: "#58CC02" },
+            { id: "rank", label: "Rank & Pass", icon: Crown, color: "#FFC800" },
+            {
+              id: "tournaments",
+              label: "Tourneys",
+              icon: Trophy,
+              color: "#FF9600",
+            },
+            { id: "social", label: "Social", icon: Users, color: "#1CB0F6" },
+            {
+              id: "shop",
+              label: "Quests & Shop",
+              icon: Sparkles,
+              color: "#CE82FF",
+            },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isSelected = activeNav === tab.id && !inArena;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  soundEngine.playTap(500);
+                  setInArena(false);
+                  setActiveNav(
+                    tab.id as
+                      | "play"
+                      | "rank"
+                      | "tournaments"
+                      | "social"
+                      | "shop"
+                  );
+                }}
+                className={`flex-1 py-2 px-1 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${
+                  isSelected
+                    ? "bg-[#F3F0E6] border-2 border-[#E5E0D5] -translate-y-1 shadow-xs"
+                    : "text-[#6C757D] hover:text-[#2B2D42]"
+                }`}
+              >
+                <Icon
+                  className="w-5 h-5"
+                  style={{ color: isSelected ? tab.color : undefined }}
+                />
+                <span
+                  className={`text-[11px] font-display font-bold ${
+                    isSelected ? "text-[#2B2D42]" : "text-[#6C757D]"
+                  }`}
+                >
+                  {tab.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
       {/* DYNAMIC PLAYER PROFILE & ACCOUNT MODAL */}
       {inspectedPlayer && (
         <DynamicProfileModal
@@ -3138,8 +3139,6 @@ export default function CodeClashApp() {
           onAuthAction={handleAuthAction}
         />
       )}
-
-      <div className="w-full max-w-5xl mx-auto px-4 pb-6"><Feedback /></div>
 
       {/* Global Chat */}
       <ChatPanel playerId={currentPlayer?.id ?? null} playerName={currentPlayer?.username} />

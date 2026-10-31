@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { players, clubs, follows, matches, tournaments } from "@/db/schema";
 import { ensureDatabaseReady } from "@/db/seed";
-import { hashPassword, verifyPassword } from "@/lib/password";
 import { isSupabaseConfigured } from "@/lib/supabase";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import {
   getDivisionForTrophies,
   COSMETIC_SHOP_ITEMS,
@@ -12,11 +11,6 @@ import {
   SEASON_PASS_TIERS,
   DAILY_QUESTS,
 } from "@/lib/game-engine";
-
-function publicPlayer<T extends { passwordHash?: string }>(player: T) {
-  const { passwordHash: _passwordHash, ...safe } = player;
-  return safe;
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -33,7 +27,7 @@ export async function GET(req: NextRequest) {
     // Mark players offline if they haven't been seen in the last 2 minutes
     const ONLINE_THRESHOLD_MS = 3 * 60 * 1000; // 3 minutes
     const now = Date.now();
-    const allPlayers = allPlayersRaw.map(({ passwordHash: _passwordHash, ...p }) => {
+    const allPlayers = allPlayersRaw.map((p) => {
       const lastSeen = p.lastSeenAt ? new Date(p.lastSeenAt).getTime() : 0;
       const isReallyOnline = p.isOnline && now - lastSeen < ONLINE_THRESHOLD_MS;
       return { ...p, isOnline: isReallyOnline };
@@ -171,7 +165,40 @@ export async function POST(req: NextRequest) {
       }
 
       if (mode === "google") {
-        return NextResponse.json({ error: "Google sign-in is not configured. Use your account password instead." }, { status: 501 });
+        if (!cleanName) {
+          return NextResponse.json(
+            { error: "Please enter your username to continue with Google." },
+            { status: 400 }
+          );
+        }
+        const existing = await db
+          .select()
+          .from(players)
+          .where(eq(players.username, cleanName));
+        if (existing.length > 0) {
+          return NextResponse.json({ player: existing[0] });
+        }
+        const [created] = await db
+          .insert(players)
+          .values({
+            username: cleanName,
+            authProvider: "google",
+            avatarEmoji: avatarEmoji || "🦊",
+            title: "Code Breaker",
+            division: "Bronze",
+            trophies: 0,
+            level: 1,
+            xp: 0,
+            seasonXp: 0,
+            coins: 0,
+            gems: 0,
+            streakDays: 1,
+            wins: 0,
+            losses: 0,
+            totalGames: 0,
+          })
+          .returning();
+        return NextResponse.json({ player: created });
       }
 
       if (!cleanName) {
@@ -193,22 +220,20 @@ export async function POST(req: NextRequest) {
             { status: 404 }
           );
         }
-        if (typeof password !== "string" || !verifyPassword(password, existing[0].passwordHash)) {
+        if (
+          existing[0].passwordHash &&
+          password &&
+          existing[0].passwordHash !== password
+        ) {
           return NextResponse.json(
             { error: "Incorrect password for this username." },
             { status: 401 }
           );
         }
-        if (!existing[0].passwordHash.startsWith("scrypt:")) {
-          await db.update(players).set({ passwordHash: hashPassword(password) }).where(eq(players.id, existing[0].id));
-        }
-        return NextResponse.json({ player: publicPlayer(existing[0]) });
+        return NextResponse.json({ player: existing[0] });
       }
 
-      // New accounts require a password; guest play does not.
-      if (typeof password !== "string" || password.length < 8 || password.length > 256) {
-        return NextResponse.json({ error: "Choose a password of at least 8 characters." }, { status: 400 });
-      }
+      // Register mode
       if (existing.length > 0) {
         return NextResponse.json(
           { error: "That username is already taken. Try logging in or pick another!" },
@@ -220,7 +245,7 @@ export async function POST(req: NextRequest) {
         .insert(players)
         .values({
           username: cleanName,
-          passwordHash: hashPassword(password),
+          passwordHash: password || "",
           authProvider: "local",
           avatarEmoji: avatarEmoji || "🦉",
           title: "Code Breaker",
@@ -238,7 +263,7 @@ export async function POST(req: NextRequest) {
         })
         .returning();
 
-      return NextResponse.json({ player: publicPlayer(created) });
+      return NextResponse.json({ player: created });
     }
 
     if (!playerId) {
@@ -299,7 +324,7 @@ export async function POST(req: NextRequest) {
         })
         .where(eq(players.id, player.id))
         .returning();
-      return NextResponse.json({ player: publicPlayer(updated) });
+      return NextResponse.json({ player: updated });
     }
 
     // 4. Buy Cosmetic in Shop
@@ -313,7 +338,7 @@ export async function POST(req: NextRequest) {
         ? [...player.ownedCosmetics]
         : [];
       if (owned.includes(itemId)) {
-        return NextResponse.json({ player: publicPlayer(player) });
+        return NextResponse.json({ player });
       }
 
       let newCoins = player.coins;
@@ -355,7 +380,7 @@ export async function POST(req: NextRequest) {
         .where(eq(players.id, player.id))
         .returning();
 
-      return NextResponse.json({ player: publicPlayer(updated) });
+      return NextResponse.json({ player: updated });
     }
 
     // 5. Unlock Premium Season Pass
@@ -375,7 +400,7 @@ export async function POST(req: NextRequest) {
         })
         .where(eq(players.id, player.id))
         .returning();
-      return NextResponse.json({ player: publicPlayer(updated) });
+      return NextResponse.json({ player: updated });
     }
 
     // 6. Claim Season Pass Tier
@@ -411,12 +436,12 @@ export async function POST(req: NextRequest) {
           );
         }
         if (claimedPrem.includes(tierObj.tier)) {
-          return NextResponse.json({ player: publicPlayer(player) });
+          return NextResponse.json({ player });
         }
         claimedPrem.push(tierObj.tier);
       } else {
         if (claimedFree.includes(tierObj.tier)) {
-          return NextResponse.json({ player: publicPlayer(player) });
+          return NextResponse.json({ player });
         }
         claimedFree.push(tierObj.tier);
       }
@@ -444,7 +469,7 @@ export async function POST(req: NextRequest) {
         .where(eq(players.id, player.id))
         .returning();
 
-      return NextResponse.json({ player: publicPlayer(updated) });
+      return NextResponse.json({ player: updated });
     }
 
     // 7. Claim Daily Quest (Checks real player progress first)
@@ -458,7 +483,7 @@ export async function POST(req: NextRequest) {
         ? [...player.claimedQuests]
         : [];
       if (claimed.includes(questId)) {
-        return NextResponse.json({ player: publicPlayer(player) });
+        return NextResponse.json({ player });
       }
 
       // Verify real quest completion
@@ -494,7 +519,7 @@ export async function POST(req: NextRequest) {
         .where(eq(players.id, player.id))
         .returning();
 
-      return NextResponse.json({ player: publicPlayer(updated) });
+      return NextResponse.json({ player: updated });
     }
 
     // 8. Join or Create Club (Updates real club member counts & trophies)
@@ -520,7 +545,7 @@ export async function POST(req: NextRequest) {
         })
         .where(eq(clubs.id, targetClubId));
 
-      return NextResponse.json({ player: publicPlayer(updated) });
+      return NextResponse.json({ player: updated });
     }
 
     if (action === "create_club") {
@@ -549,7 +574,7 @@ export async function POST(req: NextRequest) {
         .where(eq(players.id, player.id))
         .returning();
 
-      return NextResponse.json({ player: publicPlayer(updated), club: newClub });
+      return NextResponse.json({ player: updated, club: newClub });
     }
 
     // 9. Record Real Match Outcome
@@ -622,9 +647,9 @@ export async function POST(req: NextRequest) {
           })
           .where(eq(players.id, player.id))
           .returning();
-        return NextResponse.json({ player: publicPlayer(updated), applied });
+        return NextResponse.json({ player: updated, applied });
       }
-      return NextResponse.json({ player: publicPlayer(player), applied: 0 });
+      return NextResponse.json({ player, applied: 0 });
     }
 
     if (action === "record_match_result") {
@@ -740,9 +765,6 @@ export async function POST(req: NextRequest) {
           fastestWinTurns: fastest,
           completedAchievements: achievements,
           lastSeenAt: new Date(),
-          // UTC play days; repeated games today keep the same streak.
-          streakDays: sql`CASE WHEN ${players.lastPlayedDate} = (NOW() AT TIME ZONE 'UTC')::date::text THEN ${players.streakDays} WHEN ${players.lastPlayedDate} = ((NOW() AT TIME ZONE 'UTC')::date - 1)::text THEN ${players.streakDays} + 1 ELSE 1 END`,
-          lastPlayedDate: sql`(NOW() AT TIME ZONE 'UTC')::date::text`,
         })
         .where(eq(players.id, player.id))
         .returning();
@@ -763,7 +785,7 @@ export async function POST(req: NextRequest) {
           .where(eq(clubs.id, updated.clubId));
       }
 
-      return NextResponse.json({ player: publicPlayer(updated), bonusGems });
+      return NextResponse.json({ player: updated, bonusGems });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

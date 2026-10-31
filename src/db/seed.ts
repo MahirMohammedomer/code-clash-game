@@ -37,7 +37,6 @@ export async function ensureDatabaseReady() {
         coins INTEGER NOT NULL DEFAULT 0,
         gems INTEGER NOT NULL DEFAULT 0,
         streak_days INTEGER NOT NULL DEFAULT 1,
-        last_played_date TEXT,
         wins INTEGER NOT NULL DEFAULT 0,
         losses INTEGER NOT NULL DEFAULT 0,
         total_games INTEGER NOT NULL DEFAULT 0,
@@ -138,7 +137,6 @@ export async function ensureDatabaseReady() {
 
       NOTIFY pgrst, 'reload schema';
     `);
-    await pool.query("ALTER TABLE public.players ADD COLUMN IF NOT EXISTS last_played_date TEXT");
     schemaInitialized = true;
   } catch (e) {
     console.error("Database auto-migration error:", e);

@@ -37,7 +37,6 @@ export async function GET(req: NextRequest) {
       : null;
     const limit = Math.min(Number(searchParams.get("limit") || 40), 80);
 
-    if (withPlayerId) return NextResponse.json({ error: "Private chat is unavailable until secure sign-in is ready." }, { status: 503 });
     let messages;
 
     if (withPlayerId && playerId) {
@@ -87,7 +86,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { playerId, content, receiverId } = body;
 
-    if (receiverId) return NextResponse.json({ error: "Private chat is unavailable until secure sign-in is ready." }, { status: 503 });
     if (!playerId || !content) {
       return NextResponse.json(
         { error: "playerId and content are required" },

@@ -21,7 +21,26 @@ export async function GET(req: NextRequest) {
 
     // Private messages between the two players in this match
     let messages: any[] = [];
-    // Private messages are disabled until authenticated sessions are available.
+    if (playerId && opponentId) {
+      messages = await db
+        .select()
+        .from(chatMessages)
+        .where(
+          or(
+            and(
+              eq(chatMessages.senderId, playerId),
+              eq(chatMessages.receiverId, opponentId)
+            ),
+            and(
+              eq(chatMessages.senderId, opponentId),
+              eq(chatMessages.receiverId, playerId)
+            )
+          )
+        )
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(50);
+      messages = messages.reverse();
+    }
 
     const reactions = await db
       .select()
@@ -80,8 +99,49 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ reaction: row });
     }
 
-    return NextResponse.json({ error: "Private chat is unavailable until secure sign-in is ready." }, { status: 503 });
+    // Default: send private message to opponent
+    if (!pid) {
+      return NextResponse.json(
+        { error: "Login required to chat in match" },
+        { status: 401 }
+      );
+    }
 
+    const clean = sanitizeText(content, 200);
+    if (!clean) {
+      return NextResponse.json({ error: "Empty message" }, { status: 400 });
+    }
+
+    const rl = rateLimit(`mchat_${pid}`, 8, 12000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "Sending too fast" },
+        { status: 429 }
+      );
+    }
+
+    const [player] = await db
+      .select()
+      .from(players)
+      .where(eq(players.id, pid))
+      .limit(1);
+
+    if (!player) {
+      return NextResponse.json({ error: "Player not found" }, { status: 404 });
+    }
+
+    const [msg] = await db
+      .insert(chatMessages)
+      .values({
+        senderId: player.id,
+        senderName: player.username,
+        senderAvatar: player.avatarEmoji || "🦉",
+        receiverId: opponentId ? Number(opponentId) : null,
+        content: clean,
+      })
+      .returning();
+
+    return NextResponse.json({ message: msg });
   } catch (e) {
     console.error("match-chat POST", e);
     return NextResponse.json({ error: "Failed" }, { status: 500 });

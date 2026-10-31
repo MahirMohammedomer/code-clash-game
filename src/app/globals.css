@@ -2,24 +2,24 @@
 
 @layer base {
   :root {
-    --font-display: system-ui, sans-serif;
-    --font-sans: system-ui, sans-serif;
-    --font-mono: ui-monospace, monospace;
+    --font-display: var(--font-fredoka), system-ui, sans-serif;
+    --font-sans: var(--font-nunito), system-ui, sans-serif;
+    --font-mono: var(--font-mono), monospace;
   }
 
   body {
-    font-family: system-ui, sans-serif;
+    font-family: var(--font-nunito), system-ui, sans-serif;
     background-color: #FFFDF7;
     color: #2B2D42;
     overflow-x: hidden;
   }
 
   h1, h2, h3, .font-display {
-    font-family: system-ui, sans-serif;
+    font-family: var(--font-fredoka), system-ui, sans-serif;
   }
 
   .font-code {
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono), monospace;
     font-variant-numeric: tabular-nums;
   }
 }
@@ -152,16 +152,3 @@ img, svg, video {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
-
-/* The game navigation is part of the hub, not a social-app dock. */
-.game-nav { position: relative; z-index: 20; background: #182338; border-bottom: 1px solid #334155; }
-.game-nav > div { max-width: 1024px; margin: auto; min-height: 56px; padding: 6px 16px; display: flex; gap: 6px; overflow-x: auto; }
-.game-nav button { min-width: max-content; padding: 9px 15px; border-radius: 12px; color: #cbd5e1; display: flex; align-items: center; gap: 7px; font-weight: 800; font-size: 12px; }
-.game-nav button[aria-current="page"] { color: #fff; background: #385276; }
-.game-hero { position: relative; overflow: hidden; border-radius: 26px; padding: 24px; color: white; background: linear-gradient(125deg,#152d46,#255a77 65%,#338578); box-shadow: 0 10px 0 #122c41; }
-.game-hero h1 { font-size: clamp(1.8rem,5vw,2.8rem); line-height: 1.05; font-weight: 900; letter-spacing: -.04em; }
-.game-hero p { color: #d4ecf2; font-size: 14px; max-width: 390px; margin-top: 10px; }
-.game-hero .hero-orb { position: absolute; right: -20px; bottom: -36px; width: 140px; height: 140px; background: #a4efad; border: 9px solid #5abf91; border-radius: 45%; transform: rotate(-12deg); opacity: .7; }
-.mascot { animation: mascot-bob 2.4s ease-in-out infinite; transform-origin: center bottom; }
-@keyframes mascot-bob { 0%,100% { transform: translateY(0) rotate(-2deg) } 50% { transform: translateY(-5px) rotate(2deg) } }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; } }

@@ -147,8 +147,6 @@ export default function MatchSideChat({
         </button>
       </div>
 
-      {reactions.length > 0 && <p className="text-center text-xs text-slate-600" aria-live="polite">{reactions.slice(-3).map(r => `${r.senderName}: ${r.emoji}`).join("   ")}</p>}
-
       {open && (
         <div className="mx-auto mb-2 flex h-56 w-full max-w-md flex-col overflow-hidden rounded-2xl border border-emerald-500/20 bg-slate-900/95 shadow-xl">
           <div className="flex items-center justify-between bg-emerald-700/80 px-3 py-2 text-sm font-bold text-white">
@@ -160,7 +158,7 @@ export default function MatchSideChat({
           <div className="flex-1 space-y-1.5 overflow-y-auto p-2 text-sm">
             {messages.length === 0 && (
               <p className="py-4 text-center text-xs text-slate-500">
-                Private chat is temporarily unavailable while secure sign-in is being improved.
+                Say something sportsmanlike 👋
               </p>
             )}
             {messages.map((m) => (
@@ -187,15 +185,15 @@ export default function MatchSideChat({
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && sendMsg()}
-              placeholder="Private chat temporarily unavailable"
-              disabled
+              placeholder={playerId ? "Message..." : "Login to chat"}
+              disabled={!playerId}
               maxLength={200}
               className="min-w-0 flex-1 rounded-xl bg-slate-800 px-3 py-1.5 text-sm text-white outline-none"
             />
             <button
               type="button"
               onClick={sendMsg}
-              disabled
+              disabled={!playerId || !text.trim()}
               className="rounded-xl bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
             >
               Send
