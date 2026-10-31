@@ -1,3160 +1,1320 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
-import confetti from "canvas-confetti";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AIDifficulty,
-  AI_PROFILES,
-  TurnTimerOption,
-  DIVISIONS,
-  getDivisionForTrophies,
-  SEASON_PASS_TIERS,
-  COSMETIC_SHOP_ITEMS,
-  getAllShopItems,
-  DAILY_QUESTS,
-  getDailyChallenge,
-  getAllAchievements,
-  computeTrophyDelta,
-} from "@/lib/game-engine";
-import { soundEngine } from "@/lib/sound-effects";
-import CodeClashArena, { ActiveGameMode } from "@/components/CodeClashArena";
-import DynamicProfileModal, {
-  PlayerRecord,
-  getFrameClasses,
-} from "@/components/DynamicProfileModal";
-import ChatPanel from "@/components/ChatPanel";
-import MatchSideChat from "@/components/MatchSideChat";
-import MatchReplay from "@/components/MatchReplay";
-import {
-  loadSession,
-  saveSession,
-  createGuestSession,
-  clearSession,
-  pushOfflineResult,
-  generateLocalId,
-  getOfflineQueue,
-  clearOfflineQueue,
-} from "@/lib/session";
-import {
-  Flame,
-  Trophy,
-  Volume2,
-  VolumeX,
-  Swords,
-  Bot,
-  Smartphone,
-  Crown,
-  Users,
-  ShoppingBag,
-  Sparkles,
-  Search,
-  UserPlus,
-  UserCheck,
-  Plus,
-  Lock,
-  Unlock,
-  Check,
-  Clock,
-  Shield,
-  Play,
-  CheckCircle2,
-  Compass,
-  HelpCircle,
-  Database,
+  ArrowLeft, Bot, CalendarCheck, Check, ChevronRight, Coins, Download, Flame, Gem,
+  Globe, GraduationCap, KeyRound, Loader2, Lock, LogOut, Medal, MessageSquare,
+  Moon, Play, Plus, Settings, Shield, ShoppingBag, Star, Sun, Swords, Target, Trophy,
+  User, Users, Volume2, VolumeX, Zap, Crown, Timer, Sparkles, X, DoorOpen,
 } from "lucide-react";
+import GameBoard, { type GameConfig, type GameOutcome } from "@/components/GameBoard";
+import Shop from "@/components/Shop";
+import Community from "@/components/Community";
+import Tutorial from "@/components/Tutorial";
+import { Character, CharacterAvatar } from "@/components/Character";
+import {
+  ACHIEVEMENTS, AI_BOTS, DAILY_QUESTS, DIVISIONS, emptyDailyStats, getDailyChallenge,
+  getDivisionForTrophies, getShopItem, nextDivision, type AIDifficulty, type CosmeticItem,
+} from "@/lib/game-engine";
+import { normalizeAvatar } from "@/lib/avatar";
+import {
+  clearPendingResults, clearSession, lastUsername, loadGuestProfile, loadPendingResults,
+  loadRoomSession, loadSession, makeId, queuePendingResult, saveGuestProfile,
+  saveRoomSession, saveSession, tzEastMinutes, type SessionData,
+} from "@/lib/session";
+import { soundEngine } from "@/lib/sound-effects";
+import type { LeaderboardRow, Player, RoomSession } from "@/lib/types";
 
-interface ClubRecord {
-  id: number;
-  name: string;
-  tag: string;
-  badgeEmoji: string;
-  description: string;
-  totalTrophies: number;
-  memberCount: number;
+type Screen = "boot" | "welcome" | "home" | "shop" | "rank" | "community" | "game";
+
+interface Toast { id: number; msg: string; kind: "ok" | "err" }
+
+let toastSeq = 0;
+
+function localToday(): string {
+  return new Date().toLocaleDateString("en-CA");
 }
 
-interface MatchRecord {
-  id: number;
-  roomCode: string;
-  mode: string;
-  status: string;
-  timerSeconds: number;
-  player1Id: number | null;
-  player1Name: string;
-  player1Avatar: string;
-  player1Division: string;
-  player2Name: string;
-  player2Avatar: string;
-  player2Division: string;
+function DivisionBadge({ trophies, size = "md" }: { trophies: number; size?: "sm" | "md" }) {
+  const div = getDivisionForTrophies(trophies);
+  return (
+    <span className={`inline-flex items-center gap-1 font-black text-white rounded-lg ${size === "sm" ? "text-[10px] px-1.5 py-0.5" : "text-xs px-2 py-1"}`}
+      style={{ background: div.gradient, textShadow: "0 1px 2px rgba(0,0,0,.35)" }}>
+      <Shield size={size === "sm" ? 11 : 13} strokeWidth={2.8} /> {div.name}
+    </span>
+  );
 }
 
-interface TournamentRecord {
-  id: number;
-  name: string;
-  type: "mass_hunt" | "bracket";
-  status: string;
-  isPrivate: boolean;
-  inviteCode: string | null;
-  secretCode: string;
-  prizeCoins: number;
-  prizeGems: number;
-  participants: Array<{
-    playerId: number;
-    username: string;
-    avatarEmoji: string;
-    division: string;
-    attempts: number;
-    solved: boolean;
-    bestPoints: number;
-    bestOrders: number;
-    timeSeconds: number;
-  }>;
-  bracketMatches: Array<{
-    id: string;
-    round: number;
-    label: string;
-    player1Name: string;
-    player1Emoji: string;
-    player2Name: string;
-    player2Emoji: string;
-    score1: number;
-    score2: number;
-    winnerName: string | null;
-    status: "completed" | "live" | "upcoming";
-  }>;
-  createdBy: string;
+/** Build a guest profile entirely on-device (works even if the server is unreachable). */
+function makeLocalGuest(name: string): Player {
+  return {
+    id: null,
+    username: (name || `Guest${Math.floor(1000 + Math.random() * 9000)}`).slice(0, 16),
+    authProvider: "guest",
+    avatarConfig: { base: "owl", color: "classic", accessory: "none" },
+    title: "Code Breaker",
+    frameId: "frame_emerald",
+    themeId: "theme_classic",
+    effectId: "effect_confetti",
+    division: "Bronze",
+    trophies: 0, level: 1, xp: 0,
+    ownedCosmetics: ["base_owl", "color_classic", "acc_none", "frame_emerald", "theme_classic", "effect_confetti", "title_breaker"],
+    completedAchievements: [], claimedDailyQuests: [],
+    dailyStats: emptyDailyStats(localToday()),
+    dailyChallengeDone: null,
+    coins: 250, gems: 20, streakDays: 1, lastPlayDate: localToday(),
+    wins: 0, losses: 0, totalGames: 0, fastestWinTurns: null,
+    tutorialSeen: false, isAdmin: false, isGuest: true,
+  };
 }
 
-const TIMER_OPTIONS: { value: TurnTimerOption; label: string }[] = [
-  { value: 15, label: "15s" },
-  { value: 30, label: "30s" },
-  { value: 45, label: "45s" },
-  { value: 60, label: "60s" },
-  { value: 90, label: "90s" },
-  { value: 0, label: "Unlimited" },
-];
+/** Apply a match result to a guest profile locally (mirrors the server logic). */
+function applyResultToGuest(p: Player, o: GameOutcome): Player {
+  const today = localToday();
+  const stats = p.dailyStats && p.dailyStats.date === today ? { ...p.dailyStats } : emptyDailyStats(today);
+  stats.games += 1; stats.orders += o.ordersTotal;
+  if (o.won) stats.wins += 1;
+  if (o.won && o.turnsTaken <= 6) stats.fastWins += 1;
 
-const STARTER_AVATARS = ["🦉", "🦊", "🐉", "🦄", "🐼", "🦁", "🐸", "🐣"];
+  const newTrophies = Math.max(0, p.trophies + o.trophyDelta);
+  const newWins = p.wins + (o.won ? 1 : 0);
+  const achievements = [...p.completedAchievements];
+  let bonusGems = 0;
+  const check = (cond: boolean, id: string) => {
+    if (cond && !achievements.includes(id)) { achievements.push(id); bonusGems += ACHIEVEMENTS.find((a) => a.id === id)?.rewardGems || 0; }
+  };
+  check(o.won, "first_crack");
+  check(newWins >= 10, "win_10"); check(newWins >= 50, "win_50"); check(newWins >= 100, "win_100");
+  check(o.won && o.turnsTaken <= 4, "mind_reader");
+  check(o.won && o.turnsTaken <= 3, "perfect_game");
+  check(o.won && o.turnsTaken === 2, "fast_2");
+  check(o.won && o.aiDifficulty === "Mastermind", "mastermind_beat");
+  check(o.won && o.aiDifficulty === "Oracle", "oracle_slayer");
+  check(newTrophies >= 100, "trophies_100"); check(newTrophies >= 250, "trophies_250");
+  check(newTrophies >= 700, "trophies_700"); check(newTrophies >= 1000, "trophies_1000"); check(newTrophies >= 1900, "trophies_1900");
 
-export default function CodeClashApp() {
-  // Bottom Navigation Tabs
-  const [activeNav, setActiveNav] = useState<
-    "play" | "rank" | "tournaments" | "social" | "shop"
-  >("play");
+  let dailyBonus = 0;
+  let dailyDone = p.dailyChallengeDone || null;
+  if (o.won && o.dailyChallengeId) {
+    const dc = getDailyChallenge();
+    if (o.dailyChallengeId === dc.id && dailyDone !== dc.dateKey) { dailyBonus = Math.round(120 * dc.bonusMultiplier); dailyDone = dc.dateKey; }
+  }
 
-  // Focused Mode Tab inside Play Hub to reduce visual clutter
-  const [selectedPlayTab, setSelectedPlayTab] = useState<
-    "ai" | "online_1v1" | "hotseat" | "local_offline"
-  >("ai");
+  const newXp = p.xp + o.xpEarned;
+  return {
+    ...p,
+    trophies: newTrophies,
+    division: getDivisionForTrophies(newTrophies).name,
+    coins: p.coins + o.coinsEarned + dailyBonus,
+    gems: p.gems + bonusGems,
+    xp: newXp,
+    level: Math.max(p.level, Math.floor(newXp / 200) + 1),
+    wins: newWins,
+    losses: p.losses + (o.won ? 0 : 1),
+    totalGames: p.totalGames + 1,
+    fastestWinTurns: o.won && (!p.fastestWinTurns || o.turnsTaken < p.fastestWinTurns) ? o.turnsTaken : p.fastestWinTurns,
+    completedAchievements: achievements,
+    dailyStats: stats,
+    dailyChallengeDone: dailyDone,
+  };
+}
 
-  // Real Server-backed Game State (No fake fallbacks)
-  const [currentPlayer, setCurrentPlayer] = useState<PlayerRecord | null>(null);
-  const [leaderboard, setLeaderboard] = useState<PlayerRecord[]>([]);
-  const [clubs, setClubs] = useState<ClubRecord[]>([]);
-  const [followingIds, setFollowingIds] = useState<number[]>([]);
-  const [openMatches, setOpenMatches] = useState<MatchRecord[]>([]);
-  const [tournaments, setTournaments] = useState<TournamentRecord[]>([]);
-  const [supabaseReady, setSupabaseReady] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [deferredInstall, setDeferredInstall] = useState<any>(null);
-  const [isOnlineNet, setIsOnlineNet] = useState(true);
-  const dailyChallenge = getDailyChallenge();
-  const knownOnlineRef = React.useRef<Set<number>>(new Set());
+function equipOnPlayer(p: Player, item: CosmeticItem): Player {
+  const next = { ...p, avatarConfig: { ...p.avatarConfig } };
+  switch (item.category) {
+    case "avatar_base": next.avatarConfig.base = item.meta; break;
+    case "avatar_color": next.avatarConfig.color = item.meta; break;
+    case "avatar_accessory": next.avatarConfig.accessory = item.meta; break;
+    case "frame": next.frameId = item.id; break;
+    case "theme": next.themeId = item.id; break;
+    case "effect": next.effectId = item.id; break;
+    case "title": next.title = item.meta; break;
+  }
+  return next;
+}
 
+export default function Page() {
+  const [screen, setScreen] = useState<Screen>("boot");
+  const [session, setSession] = useState<SessionData | null>(null);
+  const [me, setMe] = useState<Player | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
+  const [showPlaySheet, setShowPlaySheet] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [communityTab, setCommunityTab] = useState<"reviews" | "feedback" | "lobby" | "admin">("reviews");
+  const [busyItem, setBusyItem] = useState<string | null>(null);
+  const [muted, setMuted] = useState(false);
+  const [isDark, setIsDark] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [showIosInstall, setShowIosInstall] = useState(false);
+  const [roomResume, setRoomResume] = useState<RoomSession | null>(null);
+  const [stageMood, setStageMood] = useState<"idle" | "happy" | "win">("idle");
 
-  // First-time Guided Profile Creation State
-  const [onboardingName, setOnboardingName] = useState<string>("");
-  const [onboardingPassword, setOnboardingPassword] = useState<string>("");
-  const [onboardingEmoji, setOnboardingEmoji] = useState<string>("🦉");
-  const [onboardingMode, setOnboardingMode] = useState<"register" | "login">(
-    "register"
-  );
-  const [onboardingError, setOnboardingError] = useState<string>("");
-  const [showHowToPlay, setShowHowToPlay] = useState<boolean>(false);
+  const [installEvt, setInstallEvt] = useState<{ prompt: () => void; userChoice: Promise<{ outcome: string }> } | null>(null);
+  const [lastTimer, setLastTimer] = useState(45);
 
-  // Audio Mute State
-  const [muted, setMuted] = useState<boolean>(false);
-
-  // Toast Notification Banner
-  const [toast, setToast] = useState<string | null>(null);
-
-  // Active Match Configuration
-  const [inArena, setInArena] = useState<boolean>(false);
-  const [arenaMode, setArenaMode] = useState<ActiveGameMode>("ai");
-  const [selectedTimer, setSelectedTimer] = useState<TurnTimerOption>(45);
-  const [selectedAiDifficulty, setSelectedAiDifficulty] =
-    useState<AIDifficulty>("Rookie");
-  const [activeRoomCode, setActiveRoomCode] = useState<string | undefined>(
-    undefined
-  );
-  const [isPlayer2Seat, setIsPlayer2Seat] = useState<boolean>(false);
-  const [arenaOpponentName, setArenaOpponentName] =
-    useState<string>("Opponent");
-  const [arenaOpponentAvatar, setArenaOpponentAvatar] = useState<string>("🦊");
-  const [activeTournament, setActiveTournament] =
-    useState<TournamentRecord | null>(null);
-
-  // Online 1v1 & Local Offline Room Inputs
-  const [joinRoomInput, setJoinRoomInput] = useState<string>("");
-  const [hotseatP2Name, setHotseatP2Name] = useState<string>("Player 2");
-
-  // Social Search & Dynamic Profile Inspection
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [inspectedPlayer, setInspectedPlayer] = useState<PlayerRecord | null>(
-    null
-  );
-  const [newClubName, setNewClubName] = useState<string>("");
-  const [newClubTag, setNewClubTag] = useState<string>("");
-  const [newClubDesc, setNewClubDesc] = useState<string>("");
-  const [showCreateClub, setShowCreateClub] = useState<boolean>(false);
-
-  // Create Tournament Form State
-  const [showCreateTourney, setShowCreateTourney] = useState<boolean>(false);
-  const [newTourneyName, setNewTourneyName] = useState<string>("");
-  const [newTourneyType, setNewTourneyType] = useState<"mass_hunt" | "bracket">(
-    "mass_hunt"
-  );
-  const [newTourneyPrivate, setNewTourneyPrivate] = useState<boolean>(false);
-  const [newTourneySecret, setNewTourneySecret] = useState<string>("");
-  const [privateInviteSearch, setPrivateInviteSearch] = useState<string>("");
-
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => {
-      setToast((prev) => (prev === msg ? null : prev));
-    }, 3200);
+  const showToast = useCallback((msg: string, kind: "ok" | "err" = "ok") => {
+    const id = ++toastSeq;
+    setToasts((t) => [...t.slice(-3), { id, msg, kind }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3400);
   }, []);
 
-  // Register PWA Service Worker
+  const token = session?.token || null;
+
+  /* ------------------------------ boot ------------------------------ */
   useEffect(() => {
-    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+    // Hydration-safe one-time init from browser APIs (runs once on mount).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMuted(soundEngine.isMuted());
+    setIsDark(document.documentElement.getAttribute("data-theme") === "dark");
+    setIsStandalone(window.matchMedia("(display-mode: standalone)").matches || (navigator as unknown as { standalone?: boolean }).standalone === true);
+
+    if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     }
-    setMuted(soundEngine.isMuted());
-  }, []);
-
-  // Fetch real state from PostgreSQL / Supabase API
-  const fetchGameState = useCallback(async (explicitPlayerId?: number | null) => {
-    try {
-      const savedId =
-        explicitPlayerId !== undefined
-          ? explicitPlayerId
-          : typeof window !== "undefined"
-          ? window.localStorage.getItem("code_clash_player_id")
-          : null;
-
-      const query = savedId ? `?playerId=${savedId}` : "";
-      const res = await fetch(`/api/state${query}`);
-      if (!res.ok) return;
-      const data = await res.json();
-
-      setCurrentPlayer(data.currentPlayer || null);
-      setLeaderboard(data.leaderboard || []);
-      setClubs(data.clubs || []);
-      setFollowingIds(data.followingIds || []);
-      setOpenMatches(data.matches || []);
-      setTournaments(data.tournaments || []);
-      setSupabaseReady(Boolean(data.supabaseReady));
-    } catch (e) {
-      console.error("Failed to fetch state:", e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchGameState();
-  }, [fetchGameState]);
-
-  // PWA install prompt capture
-  useEffect(() => {
-    const handler = (e: Event) => {
+    const onBIP = (e: Event) => {
       e.preventDefault();
-      setDeferredInstall(e);
+      setInstallEvt(e as unknown as { prompt: () => void; userChoice: Promise<{ outcome: string }> });
     };
-    window.addEventListener("beforeinstallprompt", handler as any);
-    setIsOnlineNet(navigator.onLine);
-    const on = () => setIsOnlineNet(true);
-    const off = () => setIsOnlineNet(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
+    window.addEventListener("beforeinstallprompt", onBIP);
+    const onInstalled = () => { setInstallEvt(null); setIsStandalone(true); showToast("Cipher Clash installed! Find it on your home screen."); };
+    window.addEventListener("appinstalled", onInstalled);
+
+    (async () => {
+      const s = loadSession();
+      if (!s) { setScreen("welcome"); return; }
+      setSession(s);
+      if (s.isGuest) {
+        let g = loadGuestProfile();
+        if (!g) {
+          try {
+            const res = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth", mode: "guest", username: s.username }) });
+            const data = await res.json();
+            g = data.player as Player;
+          } catch {}
+          if (!g) g = makeLocalGuest(s.username);
+        }
+        if (g) {
+          g = { ...g, avatarConfig: normalizeAvatar(g.avatarConfig) };
+          // guest streak (local): simple day check
+          const today = localToday();
+          if (g.lastPlayDate !== today) {
+            const yday = new Date(Date.now() - 86400000).toLocaleDateString("en-CA");
+            g = { ...g, streakDays: g.lastPlayDate === yday ? (g.streakDays || 1) + 1 : 1, lastPlayDate: today };
+          }
+          saveGuestProfile(g);
+          setMe(g);
+          setScreen("home");
+          setRoomResume(loadRoomSession());
+          if (!g.tutorialSeen) setShowTutorial(true);
+          fetch("/api/state").then((r) => r.json()).then((d) => setLeaderboard(d.leaderboard || [])).catch(() => {});
+          return;
+        }
+        setScreen("welcome");
+        return;
+      }
+      // registered
+      try {
+        const res = await fetch(`/api/state?token=${s.token}&tz=${tzEastMinutes()}`);
+        const data = await res.json();
+        if (!data.currentPlayer) throw new Error("session expired");
+        const p = { ...(data.currentPlayer as Player), avatarConfig: normalizeAvatar(data.currentPlayer.avatarConfig) };
+        setMe(p);
+        setLeaderboard(data.leaderboard || []);
+        setScreen("home");
+        setRoomResume(loadRoomSession());
+        if (data.streakInfo?.isNewDay) {
+          setTimeout(() => showToast(`Day ${data.streakInfo.streakDays} streak! +${data.streakInfo.bonusCoins} coins login bonus${data.streakInfo.bonusGems ? ` and +${data.streakInfo.bonusGems} gems!` : ""}`), 600);
+        }
+        if (!p.tutorialSeen) setTimeout(() => setShowTutorial(true), 500);
+        // flush queued results
+        const pending = loadPendingResults();
+        if (pending.length) {
+          clearPendingResults();
+          for (const pr of pending) {
+            await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...pr.payload, token: s.token }) }).catch(() => {});
+          }
+          const r2 = await fetch(`/api/state?token=${s.token}&tz=${tzEastMinutes()}`).then((r) => r.json()).catch(() => null);
+          if (r2?.currentPlayer) setMe({ ...r2.currentPlayer, avatarConfig: normalizeAvatar(r2.currentPlayer.avatarConfig) });
+        }
+      } catch (e) {
+        // Network failure? Keep the stored token so the next launch can retry.
+        if (e instanceof Error && e.message === "session expired") {
+          clearSession();
+          setSession(null);
+        } else {
+          setTimeout(() => showToast("Couldn't reach the server — check your connection. Guest & bot modes still work!", "err"), 600);
+        }
+        setScreen("welcome");
+      }
+    })();
+
     return () => {
-      window.removeEventListener("beforeinstallprompt", handler as any);
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
+      window.removeEventListener("beforeinstallprompt", onBIP);
+      window.removeEventListener("appinstalled", onInstalled);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Ensure a player profile exists (Guest = local only, never written to DB)
-  const ensurePlayerProfile = async (): Promise<PlayerRecord | null> => {
-    if (currentPlayer) return currentPlayer;
+  /* heartbeat + light refresh */
+  useEffect(() => {
+    if (!token) return;
+    const beat = () => fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "heartbeat", token }) }).catch(() => {});
+    const t = setInterval(beat, 45000);
+    return () => clearInterval(t);
+  }, [token]);
 
-    // Restore from local session first
-    const saved = loadSession();
-    if (saved && saved.isGuest) {
-      const guestPlayer = {
-        id: null as any,
-        username: saved.username,
-        avatarEmoji: saved.avatarEmoji,
-        title: "Guest Breaker",
-        frameId: "frame_emerald",
-        themeId: "theme_classic",
-        effectId: "effect_confetti",
-        division: "Bronze",
-        trophies: 0,
-        level: 1,
-        xp: 0,
-        seasonXp: 0,
-        hasPremiumPass: false,
-        claimedFreeTiers: [] as number[],
-        claimedPremiumTiers: [] as number[],
-        ownedCosmetics: ["frame_emerald", "theme_classic", "effect_confetti", "title_breaker"],
-        completedAchievements: [] as string[],
-        claimedQuests: [] as string[],
-        coins: 0,
-        gems: 0,
-        streakDays: 1,
-        wins: 0,
-        losses: 0,
-        totalGames: 0,
-        fastestWinTurns: null as number | null,
-        clubId: null as number | null,
-        isOnline: true,
-        lastSeenAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-        authProvider: "guest",
-        passwordHash: "",
-      };
-      setCurrentPlayer(guestPlayer as any);
-      return guestPlayer as any;
-    }
-
+  const refreshState = useCallback(async () => {
+    if (!token) return;
     try {
-      const res = await fetch("/api/state", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "auth",
-          mode: "guest",
-          avatarEmoji: onboardingEmoji,
-        }),
-      });
+      const res = await fetch(`/api/state?token=${token}&tz=${tzEastMinutes()}`);
       const data = await res.json();
-      if (data.player) {
-        // Guests: save only to local session, never store null id as real id
-        if (data.player.id == null || data.player.isGuest) {
-          createGuestSession(data.player.username);
-        } else if (typeof window !== "undefined") {
-          window.localStorage.setItem(
-            "code_clash_player_id",
-            String(data.player.id)
-          );
-          saveSession({
-            id: data.player.id,
-            username: data.player.username,
-            avatarEmoji: data.player.avatarEmoji,
-            isGuest: false,
-          });
-        }
-        setCurrentPlayer(data.player);
-        if (data.player.id) fetchGameState(data.player.id);
-        return data.player;
-      }
+      if (data.currentPlayer) setMe({ ...data.currentPlayer, avatarConfig: normalizeAvatar(data.currentPlayer.avatarConfig) });
+      if (data.leaderboard) setLeaderboard(data.leaderboard);
     } catch {}
-    // Fully offline fallback
-    const g = createGuestSession();
-    const offlineGuest = {
-      id: null as any,
-      username: g.username,
-      avatarEmoji: g.avatarEmoji,
-      title: "Guest Breaker",
-      division: "Bronze",
-      trophies: 0,
-      level: 1,
-      xp: 0,
-      coins: 0,
-      gems: 0,
-      wins: 0,
-      losses: 0,
-      totalGames: 0,
-      streakDays: 1,
-      isOnline: true,
-      authProvider: "guest",
-    };
-    setCurrentPlayer(offlineGuest as any);
-    return offlineGuest as any;
-  };
+  }, [token]);
 
-  // Launch vs AI Match
-  const handleStartAIMatch = async (diff: AIDifficulty) => {
-    soundEngine.playTap(580);
-    await ensurePlayerProfile();
-    setSelectedAiDifficulty(diff);
-    setArenaMode("ai");
-    setActiveRoomCode(undefined);
-    setIsPlayer2Seat(false);
-    setInArena(true);
-  };
-
-  // Launch Hotseat Match (Same Phone)
-  const handleStartHotseat = async () => {
-    soundEngine.playTap(580);
-    await ensurePlayerProfile();
-    setArenaMode("hotseat");
-    setArenaOpponentName(hotseatP2Name.trim() || "Player 2");
-    setArenaOpponentAvatar("🦁");
-    setActiveRoomCode(undefined);
-    setIsPlayer2Seat(false);
-    setInArena(true);
-  };
-
-  // Create Online 1v1 or Local 2-Phone Room
-  const handleCreateOrChallengeOnline = async (
-    targetPlayer?: PlayerRecord,
-    mode: "online_1v1" | "local_offline" = "online_1v1"
-  ) => {
-    soundEngine.playTap(600);
-    const active = await ensurePlayerProfile();
-    if (!active) return;
-
-    try {
-      const res = await fetch("/api/matches", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "create_room",
-          mode,
-          timerSeconds: selectedTimer,
-          player1Id: active.id,
-          player1Name: active.username,
-          player1Avatar: active.avatarEmoji,
-          player1Division: active.division,
-          targetOpponentName: targetPlayer?.username,
-          targetOpponentAvatar: targetPlayer?.avatarEmoji,
-          targetOpponentDivision: targetPlayer?.division,
-        }),
-      });
-      const data = await res.json();
-      if (data.match) {
-        setArenaMode(mode);
-        setActiveRoomCode(data.match.roomCode);
-        setArenaOpponentName(
-          targetPlayer?.username || "Waiting for Player 2..."
-        );
-        setArenaOpponentAvatar(targetPlayer?.avatarEmoji || "⚔️");
-        setIsPlayer2Seat(false);
-        setInspectedPlayer(null);
-        setInArena(true);
-        showToast(
-          `📡 Room ${data.match.roomCode} created! Lock your secret code to begin.`
-        );
-        fetchGameState(active.id);
-      }
-    } catch {
-      showToast("Could not create room — check your connection.");
-    }
-  };
-
-  // Join an existing Online 1v1 or Local 2-Phone Room by Code
-  const handleJoinRoomByCode = async (
-    codeToJoin: string,
-    mode: "online_1v1" | "local_offline" = "online_1v1"
-  ) => {
-    const clean = codeToJoin.trim().toUpperCase();
-    if (!clean) {
-      showToast("Enter a valid Room Code first!");
+  /* ------------------------------ auth ------------------------------ */
+  const doAuth = async (mode: "login" | "register" | "guest", username: string, password: string) => {
+    if (mode === "guest") {
+      const existing = loadGuestProfile();
+      const name = username.trim() || existing?.username || "";
+      const guest = existing && (!name || existing.username === name) ? existing : makeLocalGuest(name);
+      saveGuestProfile(guest);
+      const gs: SessionData = { playerId: null, username: guest.username, token: null, isGuest: true };
+      saveSession(gs); setSession(gs); setMe(guest);
+      setScreen("home");
+      soundEngine.playJoin();
+      fetch("/api/state").then((r) => r.json()).then((d) => setLeaderboard(d.leaderboard || [])).catch(() => {});
+      if (!guest.tutorialSeen) setTimeout(() => setShowTutorial(true), 400);
       return;
     }
-    soundEngine.playTap(600);
-    const active = await ensurePlayerProfile();
-    if (!active) return;
-
-    try {
-      const res = await fetch("/api/matches", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "join_room",
-          roomCode: clean,
-          player2Id: active.id,
-          player2Name: active.username,
-          player2Avatar: active.avatarEmoji,
-          player2Division: active.division,
-        }),
-      });
-      const data = await res.json();
-      if (data.match) {
-        setArenaMode(mode);
-        setActiveRoomCode(data.match.roomCode);
-        setArenaOpponentName(data.match.player1Name);
-        setArenaOpponentAvatar(data.match.player1Avatar || "🦉");
-        setIsPlayer2Seat(true);
-        setInArena(true);
-        showToast(
-          `⚡ Joined Room ${data.match.roomCode} vs ${data.match.player1Name}!`
-        );
-      } else {
-        showToast(data.error || "Room code not found!");
-      }
-    } catch {
-      showToast("Could not join room.");
+    const res = await fetch("/api/state", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "auth", mode, username, password, tz: tzEastMinutes() }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Something went wrong");
+    const player = { ...(data.player as Player), avatarConfig: normalizeAvatar(data.player.avatarConfig) };
+    {
+      const s: SessionData = { playerId: player.id, username: player.username, token: data.token, isGuest: false };
+      saveSession(s); setSession(s); setMe(player);
+      if (data.streakInfo?.isNewDay) setTimeout(() => showToast(`Day ${data.streakInfo.streakDays} streak! +${data.streakInfo.bonusCoins} coins`), 500);
+      fetch("/api/state").then((r) => r.json()).then((d) => setLeaderboard(d.leaderboard || [])).catch(() => {});
     }
+    setScreen("home");
+    soundEngine.playJoin();
+    if (!player.tutorialSeen) setTimeout(() => setShowTutorial(true), 400);
   };
 
-  // Enter a Real Tournament Match
-  const handleEnterTournamentMatch = async (tourney: TournamentRecord) => {
-    soundEngine.playTap(620);
-    const active = await ensurePlayerProfile();
-    if (!active) return;
-
-    // Register participant in tournament
-    try {
-      const res = await fetch("/api/tournaments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "join_tournament",
-          tournamentId: tourney.id,
-          playerId: active.id,
-          username: active.username,
-          avatarEmoji: active.avatarEmoji,
-          division: active.division,
-        }),
-      });
-      const data = await res.json();
-      if (data.tournament) {
-        setActiveTournament(data.tournament);
-      } else {
-        setActiveTournament(tourney);
-      }
-    } catch {
-      setActiveTournament(tourney);
-    }
-
-    if (tourney.type === "mass_hunt") {
-      setArenaMode("mass_hunt");
-      setArenaOpponentName(tourney.name);
-      setArenaOpponentAvatar("🏦");
-      setInArena(true);
-    } else {
-      setArenaMode("ai");
-      setSelectedAiDifficulty("Mastermind");
-      setArenaOpponentName(`${tourney.name} Challenger`);
-      setArenaOpponentAvatar("⚔️");
-      setInArena(true);
-    }
+  const logout = () => {
+    clearSession();
+    setSession(null);
+    setMe(null);
+    setShowSettings(false);
+    setShowProfile(false);
+    setScreen("welcome");
   };
 
-  // Record Match Outcome — works online + queues offline; guests update locally
-  const handleMatchComplete = async (result: {
-    won: boolean;
-    turnsTaken: number;
-    trophyDelta: number;
-    coinsEarned: number;
-    xpEarned: number;
-    aiDifficulty?: AIDifficulty;
-  }) => {
-    if (!currentPlayer) return;
-
-    const isGuest = !currentPlayer.id || (currentPlayer as any).isGuest || (currentPlayer as any).authProvider === "guest";
-
-    // Always apply local optimistic update so UI & leaderboard feel alive
-    const applyLocal = (p: PlayerRecord) => {
-      const delta = result.won ? result.trophyDelta : -Math.floor(result.trophyDelta * 0.5);
-      const newTrophies = Math.max(0, (p.trophies || 0) + delta);
-      const div = getDivisionForTrophies(newTrophies);
-      const newXp = (p.xp || 0) + result.xpEarned;
-      return {
-        ...p,
-        trophies: newTrophies,
-        division: div.name,
-        xp: newXp,
-        seasonXp: (p.seasonXp || 0) + result.xpEarned,
-        level: Math.max(p.level || 1, Math.floor(newXp / 200) + 1),
-        coins: (p.coins || 0) + result.coinsEarned,
-        wins: (p.wins || 0) + (result.won ? 1 : 0),
-        losses: (p.losses || 0) + (result.won ? 0 : 1),
-        totalGames: (p.totalGames || 0) + 1,
-        fastestWinTurns:
-          result.won && (!p.fastestWinTurns || result.turnsTaken < p.fastestWinTurns)
-            ? result.turnsTaken
-            : p.fastestWinTurns,
-      } as PlayerRecord;
-    };
-
-    const updatedLocal = applyLocal(currentPlayer);
-    setCurrentPlayer(updatedLocal);
-
-    // Guests: local only, never hit DB
-    if (isGuest) {
-      saveSession({
-        id: null,
-        username: updatedLocal.username,
-        avatarEmoji: updatedLocal.avatarEmoji || "🦉",
-        isGuest: true,
-      });
-      // Persist guest stats in localStorage so they survive refresh
-      try {
-        localStorage.setItem(
-          "codeclash_guest_stats",
-          JSON.stringify({
-            trophies: updatedLocal.trophies,
-            wins: updatedLocal.wins,
-            losses: updatedLocal.losses,
-            totalGames: updatedLocal.totalGames,
-            coins: updatedLocal.coins,
-            xp: updatedLocal.xp,
-            level: updatedLocal.level,
-            division: updatedLocal.division,
-          })
-        );
-      } catch {}
-      showToast(
-        result.won
-          ? `🎉 Win! +${result.trophyDelta} trophies (Guest — create account to appear on global board)`
-          : `Match over. Stats saved on this device.`
-      );
+  /* --------------------------- results --------------------------- */
+  const handleResult = useCallback(async (outcome: GameOutcome) => {
+    if (!me) return;
+    if (session?.isGuest || !token) {
+      const updated = applyResultToGuest(me, outcome);
+      const newOnes = updated.completedAchievements.filter((a) => !me.completedAchievements.includes(a));
+      saveGuestProfile(updated);
+      setMe(updated);
+      for (const id of newOnes) {
+        const ach = ACHIEVEMENTS.find((a) => a.id === id);
+        if (ach) setTimeout(() => showToast(`Achievement unlocked: ${ach.title} (+${ach.rewardGems} gems)`), 900);
+      }
       return;
     }
-
-    // Registered player: try server, else queue offline
+    const payload = {
+      action: "record_match_result", tz: tzEastMinutes(), resultId: makeId("res"),
+      won: outcome.won, mode: outcome.mode, turnsTaken: outcome.turnsTaken,
+      ordersTotal: outcome.ordersTotal, aiDifficulty: outcome.aiDifficulty,
+      trophyDelta: outcome.trophyDelta, coinsEarned: outcome.coinsEarned,
+      xpEarned: outcome.xpEarned, dailyChallengeId: outcome.dailyChallengeId,
+    };
     try {
-      const res = await fetch("/api/state", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "record_match_result",
-          playerId: currentPlayer.id,
-          ...result,
-        }),
-      });
-      if (!res.ok) throw new Error("server error");
+      const res = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, token }) });
       const data = await res.json();
-      if (data.player) {
-        setCurrentPlayer(data.player);
-        if (data.bonusGems > 0) {
-          showToast(`🏅 Achievement Unlocked! +${data.bonusGems} Royal Gems!`);
-        } else if (result.won) {
-          showToast(`🏆 +${result.trophyDelta} trophies · Rank: ${data.player.division}`);
+      if (data.player) setMe({ ...data.player, avatarConfig: normalizeAvatar(data.player.avatarConfig) });
+      if (Array.isArray(data.unlocked)) {
+        for (const id of data.unlocked) {
+          const ach = ACHIEVEMENTS.find((a) => a.id === id);
+          if (ach) setTimeout(() => showToast(`Achievement unlocked: ${ach.title} (+${ach.rewardGems} gems)`), 900);
         }
       }
-      if (
-        activeTournament &&
-        activeTournament.type === "bracket" &&
-        result.won
-      ) {
-        await fetch("/api/tournaments", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "advance_bracket",
-            tournamentId: activeTournament.id,
-            winnerName: currentPlayer.username,
-          }),
-        });
-      }
-      if (currentPlayer.id) fetchGameState(currentPlayer.id);
+      if (data.dailyBonus) setTimeout(() => showToast(`Daily challenge complete! +${data.dailyBonus} bonus coins`), 1200);
     } catch {
-      // Offline or network fail — queue for later sync
-      pushOfflineResult({
-        id: generateLocalId(),
-        mode: result.aiDifficulty ? "ai" : "match",
-        won: result.won,
-        turns: result.turnsTaken,
-        opponentName: "offline",
-        timestamp: new Date().toISOString(),
-        coinsEarned: result.coinsEarned,
-        trophiesDelta: result.trophyDelta,
-      });
-      showToast(
-        result.won
-          ? `🏆 Win saved offline · +${result.trophyDelta} trophies (will sync when online)`
-          : `Result saved offline — will sync later`
-      );
+      queuePendingResult(payload);
     }
-  };
+  }, [me, session, token, showToast]);
 
-  // Sync offline match queue when back online (batch — ranks update correctly)
-  const syncOfflineQueue = useCallback(async () => {
-    if (!currentPlayer?.id) return;
-    const queue = getOfflineQueue();
-    if (!queue.length) return;
-    try {
-      const res = await fetch("/api/state", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "sync_offline_batch",
-          playerId: currentPlayer.id,
-          results: queue.map((item) => ({
-            won: item.won,
-            turnsTaken: item.turns,
-            trophyDelta: item.trophiesDelta,
-            coinsEarned: item.coinsEarned,
-            xpEarned: item.won ? 100 : 40,
-          })),
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        clearOfflineQueue();
-        if (data.player) setCurrentPlayer(data.player);
-        if (data.applied > 0) {
-          showToast(`☁️ Synced ${data.applied} offline match${data.applied > 1 ? "es" : ""} → rank updated!`);
-        }
-        fetchGameState(currentPlayer.id);
-      }
-    } catch {
-      // keep queue
-    }
-  }, [currentPlayer, fetchGameState, showToast]);
-
-  // Heartbeat + sync offline results (after syncOfflineQueue is defined)
-  useEffect(() => {
-    if (!currentPlayer?.id) return;
-
-    const beat = () => {
-      fetch("/api/state", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "heartbeat", playerId: currentPlayer.id }),
-      }).catch(() => {});
-    };
-    beat();
-    const hb = setInterval(beat, 45000);
-
-    const sync = () => {
-      if (navigator.onLine) syncOfflineQueue();
-    };
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("focus", sync);
-
-    if (typeof Notification !== "undefined" && Notification.permission === "default") {
-      Notification.requestPermission().catch(() => {});
-    }
-
-    return () => {
-      clearInterval(hb);
-      window.removeEventListener("online", sync);
-      window.removeEventListener("focus", sync);
-    };
-  }, [currentPlayer?.id, syncOfflineQueue]);
-
-  // Detect friends coming online
-  useEffect(() => {
-    if (!leaderboard.length || !followingIds.length) return;
-    const onlineNow = new Set(
-      leaderboard.filter((p) => p.isOnline && followingIds.includes(p.id)).map((p) => p.id)
-    );
-    onlineNow.forEach((id) => {
-      if (!knownOnlineRef.current.has(id)) {
-        const p = leaderboard.find((x) => x.id === id);
-        if (p && typeof Notification !== "undefined" && Notification.permission === "granted") {
-          try {
-            new Notification("Code Clash", {
-              body: `${p.username} is online — challenge them!`,
-              icon: "/icon-192.svg",
-            });
-          } catch {}
-        }
-      }
-    });
-    knownOnlineRef.current = onlineNow;
-  }, [leaderboard, followingIds]);
-
-  // Toggle Follow / Unfollow
-  const handleToggleFollow = async (targetId: number) => {
-    if (!currentPlayer) {
-      showToast("Create your profile first to follow players!");
-      return;
-    }
-    soundEngine.playTap(520);
-    const already = followingIds.includes(targetId);
-    setFollowingIds((prev) =>
-      already ? prev.filter((id) => id !== targetId) : [...prev, targetId]
-    );
-    await fetch("/api/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "toggle_follow",
-        playerId: currentPlayer.id,
-        targetId,
-      }),
-    });
-    showToast(already ? "Unfollowed player." : "🤝 Following player!");
-  };
-
-  // Update Cosmetics
-  const handleUpdateCosmetics = async (updates: {
-    frameId?: string;
-    themeId?: string;
-    effectId?: string;
-    title?: string;
-    avatarEmoji?: string;
-  }) => {
-    if (!currentPlayer) return;
-    const res = await fetch("/api/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "update_cosmetics",
-        playerId: currentPlayer.id,
-        ...updates,
-      }),
-    });
-    const data = await res.json();
-    if (data.player) {
-      setCurrentPlayer(data.player);
-      setInspectedPlayer(data.player);
-      showToast("✨ Profile updated!");
-      fetchGameState(data.player.id);
-    }
-  };
-
-  // Auth Action (Login, Register, Google, Guest)
-  const handleAuthAction = async (payload: {
-    mode: "login" | "register" | "google" | "guest";
-    username?: string;
-    password?: string;
-    avatarEmoji?: string;
-  }) => {
-    const res = await fetch("/api/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "auth",
-        ...payload,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) {
-      throw new Error(data.error || "Authentication failed");
-    }
-    if (data.player) {
-      const isGuest = !data.player.id || data.player.isGuest || data.player.authProvider === "guest";
-      if (typeof window !== "undefined") {
-        if (isGuest) {
-          // Guests stay local only
-          window.localStorage.removeItem("code_clash_player_id");
-          createGuestSession(data.player.username);
-        } else {
-          window.localStorage.setItem(
-            "code_clash_player_id",
-            String(data.player.id)
-          );
-          saveSession({
-            id: data.player.id,
-            username: data.player.username,
-            avatarEmoji: data.player.avatarEmoji || "🦉",
-            isGuest: false,
-          });
-        }
-      }
-      setCurrentPlayer(data.player);
-      if (inspectedPlayer && !isGuest) setInspectedPlayer(data.player);
-      showToast(`🎉 Welcome to Code Clash, ${data.player.username}!`);
-      if (!isGuest && data.player.id) fetchGameState(data.player.id);
-    }
-  };
-
-  // Quick Onboarding Form Submit
-  const handleOnboardingSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setOnboardingError("");
-    if (!onboardingName.trim()) {
-      setOnboardingError("Please enter a username to begin.");
+  /* --------------------------- shop actions --------------------------- */
+  const handleBuy = async (item: CosmeticItem) => {
+    if (!me) return;
+    setBusyItem(item.id);
+    if (session?.isGuest || !token) {
+      const priceC = item.priceCoins || 0, priceG = item.priceGems || 0;
+      if (priceC && me.coins < priceC) { showToast(`Need ${priceC} coins — win matches to earn!`, "err"); setBusyItem(null); return; }
+      if (priceG && me.gems < priceG) { showToast(`Need ${priceG} gems — finish quests & achievements!`, "err"); setBusyItem(null); return; }
+      let updated: Player = { ...me, coins: me.coins - priceC, gems: me.gems - priceG, ownedCosmetics: [...me.ownedCosmetics, item.id] };
+      updated = equipOnPlayer(updated, item);
+      saveGuestProfile(updated); setMe(updated);
+      soundEngine.playReward(); showToast(`${item.name} is yours!`);
+      setBusyItem(null);
       return;
     }
     try {
-      await handleAuthAction({
-        mode: onboardingMode,
-        username: onboardingName.trim(),
-        password: onboardingPassword,
-        avatarEmoji: onboardingEmoji,
-      });
-      setOnboardingName("");
-      setOnboardingPassword("");
-    } catch (err: unknown) {
-      setOnboardingError(
-        err instanceof Error ? err.message : "Could not sign in"
-      );
-    }
-  };
-
-  // Buy Cosmetic Item
-  const handleBuyCosmetic = async (itemId: string) => {
-    if (!currentPlayer) {
-      showToast("Create your profile first to unlock cosmetics!");
-      return;
-    }
-    soundEngine.playReward();
-    const res = await fetch("/api/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "buy_cosmetic",
-        playerId: currentPlayer.id,
-        itemId,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) {
-      showToast(`⚠️ ${data.error || "Cannot purchase"}`);
-      return;
-    }
-    if (data.player) {
-      setCurrentPlayer(data.player);
-      confetti({ particleCount: 55, spread: 60, origin: { y: 0.7 } });
-      showToast("🎨 Cosmetic unlocked & equipped!");
-    }
-  };
-
-  // Claim Season Pass Tier
-  const handleClaimPassTier = async (tier: number, isPremium: boolean) => {
-    if (!currentPlayer) return;
-    soundEngine.playReward();
-    const res = await fetch("/api/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "claim_pass_tier",
-        playerId: currentPlayer.id,
-        tier,
-        isPremium,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) {
-      showToast(`⚠️ ${data.error}`);
-      return;
-    }
-    if (data.player) {
-      setCurrentPlayer(data.player);
-      confetti({ particleCount: 60, spread: 65, origin: { y: 0.6 } });
-      showToast(`🎁 Claimed Season Pass Tier ${tier} reward!`);
-    }
-  };
-
-  // Unlock Premium Season Pass
-  const handleUnlockPremiumPass = async () => {
-    if (!currentPlayer) {
-      showToast("Create your profile first!");
-      return;
-    }
-    const res = await fetch("/api/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "unlock_premium_pass",
-        playerId: currentPlayer.id,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) {
-      showToast(`⚠️ ${data.error}`);
-      return;
-    }
-    if (data.player) {
-      soundEngine.playVictory();
-      setCurrentPlayer(data.player);
-      confetti({ particleCount: 90, spread: 80, origin: { y: 0.6 } });
-      showToast("👑 Royal Season Pass Unlocked!");
-    }
-  };
-
-  // Claim Daily Quest
-  const handleClaimQuest = async (questId: string) => {
-    if (!currentPlayer) {
-      showToast("Create a profile and complete the quest first!");
-      return;
-    }
-    const res = await fetch("/api/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "claim_quest",
-        playerId: currentPlayer.id,
-        questId,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) {
-      showToast(`⚠️ ${data.error}`);
-      return;
-    }
-    if (data.player) {
+      const res = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "buy_cosmetic", token, itemId: item.id }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Purchase failed");
+      setMe({ ...data.player, avatarConfig: normalizeAvatar(data.player.avatarConfig) });
       soundEngine.playReward();
-      setCurrentPlayer(data.player);
-      confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
-      showToast("🔥 Daily Quest Claimed!");
+      showToast(`${item.name} equipped!`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Purchase failed", "err");
+    }
+    setBusyItem(null);
+  };
+
+  const handleEquip = async (item: CosmeticItem) => {
+    if (!me) return;
+    setBusyItem(item.id);
+    // optimistic for snappy feel
+    const optimistic = equipOnPlayer(me, item);
+    setMe(optimistic);
+    if (session?.isGuest || !token) {
+      saveGuestProfile(optimistic);
+      soundEngine.playTap(700);
+      setBusyItem(null);
+      return;
+    }
+    try {
+      const res = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "equip_cosmetic", token, itemId: item.id }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Equip failed");
+      setMe({ ...data.player, avatarConfig: normalizeAvatar(data.player.avatarConfig) });
+      soundEngine.playTap(700);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Equip failed", "err");
+      refreshState();
+    }
+    setBusyItem(null);
+  };
+
+  const claimQuest = async (questId: string) => {
+    if (!me) return;
+    const quest = DAILY_QUESTS.find((q) => q.id === questId);
+    if (!quest) return;
+    if (session?.isGuest || !token) {
+      const today = localToday();
+      const key = `${questId}:${today}`;
+      if (me.claimedDailyQuests?.includes(key)) return;
+      const stats = me.dailyStats?.date === today ? me.dailyStats : emptyDailyStats(today);
+      if ((stats[quest.statKey] || 0) < quest.target) { showToast("Quest not finished yet!", "err"); return; }
+      const newXp = me.xp + quest.rewardXp;
+      const updated = {
+        ...me, coins: me.coins + quest.rewardCoins, gems: me.gems + (quest.rewardGems || 0),
+        xp: newXp, level: Math.max(me.level, Math.floor(newXp / 200) + 1),
+        claimedDailyQuests: [...(me.claimedDailyQuests || []), key],
+      };
+      saveGuestProfile(updated); setMe(updated);
+      soundEngine.playReward(); showToast(`Quest complete! +${quest.rewardCoins} coins`);
+      return;
+    }
+    try {
+      const res = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "claim_quest", token, questId, tz: tzEastMinutes() }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Claim failed");
+      setMe({ ...data.player, avatarConfig: normalizeAvatar(data.player.avatarConfig) });
+      soundEngine.playReward();
+      showToast(`Quest complete! +${quest.rewardCoins} coins${quest.rewardGems ? ` +${quest.rewardGems} gems` : ""}`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Claim failed", "err");
     }
   };
 
-  // Create New Tournament
-  const handleCreateTournament = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const active = await ensurePlayerProfile();
-    if (!active) return;
-
-    if (!newTourneyName.trim()) {
-      showToast("Please enter a tournament name.");
+  /* --------------------------- install --------------------------- */
+  const installApp = async () => {
+    if (installEvt) {
+      try {
+        installEvt.prompt();
+        await installEvt.userChoice;
+        setInstallEvt(null);
+      } catch {}
       return;
     }
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (isIOS) setShowIosInstall(true);
+    else showToast("Almost there — open your browser menu and tap “Install app”.");
+  };
 
-    soundEngine.playReward();
-    const res = await fetch("/api/tournaments", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "create_tournament",
-        name: newTourneyName.trim(),
-        type: newTourneyType,
-        isPrivate: newTourneyPrivate,
-        secretCode: newTourneySecret.trim(),
-        prizeCoins: 500,
-        prizeGems: 25,
-        createdBy: active.username,
-        creatorId: active.id,
-        creatorEmoji: active.avatarEmoji,
-        creatorDivision: active.division,
-      }),
-    });
+  const setTheme = (dark: boolean) => {
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    localStorage.setItem("cipherclash_theme", dark ? "dark" : "light");
+    setIsDark(dark);
+    soundEngine.playTap(600);
+  };
+
+  /* --------------------------- game starters --------------------------- */
+  const startAI = (difficulty: AIDifficulty, timer: number, daily?: { rule: GameConfig["dailyRule"]; id: string }) => {
+    setLastTimer(timer);
+    setGameConfig({ mode: "ai", aiDifficulty: difficulty, timerSeconds: timer, dailyRule: daily?.rule, dailyChallengeId: daily?.id });
+    setShowPlaySheet(false);
+    setScreen("game");
+    soundEngine.playTap(660);
+  };
+
+  const startHotseat = (timer: number) => {
+    setLastTimer(timer);
+    setGameConfig({ mode: "hotseat", timerSeconds: timer });
+    setShowPlaySheet(false);
+    setScreen("game");
+  };
+
+  const enterOnline = (room: RoomSession & { timerSeconds?: number }) => {
+    saveRoomSession(room);
+    setRoomResume(room);
+    setGameConfig({ mode: "online", roomCode: room.roomCode, slot: room.slot, token: room.token, timerSeconds: room.timerSeconds || 45 });
+    setShowPlaySheet(false);
+    setScreen("game");
+  };
+
+  const startOnlineAction = async (action: "quick_match" | "create_room" | "join_room", timer: number, joinCode?: string) => {
+    if (!me) return;
+    setLastTimer(timer);
+    const body: Record<string, unknown> = {
+      action,
+      name: me.username,
+      avatar: me.avatarConfig,
+      frame: me.frameId,
+      division: me.division,
+      playerId: me.id,
+      timerSeconds: timer,
+      isPrivate: action === "create_room",
+    };
+    if (action === "join_room") {
+      body.roomCode = joinCode;
+      const existing = loadRoomSession();
+      if (existing && existing.roomCode === (joinCode || "").toUpperCase().replace(/[^A-Z0-9]/g, "")) body.token = existing.token;
+    }
+    const res = await fetch("/api/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const data = await res.json();
-    if (!res.ok || data.error) {
-      showToast(`⚠️ ${data.error || "Failed to create tournament"}`);
-      return;
-    }
-    if (data.tournament) {
-      setTournaments((prev) => [data.tournament, ...prev]);
-      setShowCreateTourney(false);
-      setNewTourneyName("");
-      setNewTourneySecret("");
-      showToast(
-        data.tournament.inviteCode
-          ? `🔒 Private Tournament Created! Invite Code: ${data.tournament.inviteCode}`
-          : "🏆 Tournament Created!"
-      );
-    }
+    if (!res.ok) throw new Error(data.error || "Could not start online match");
+    enterOnline({ roomCode: data.match.roomCode, slot: data.slot, token: data.token, savedAt: Date.now(), timerSeconds: data.match.timerSeconds });
+    if (data.joined) showToast("Rival found! Hide your code!");
   };
 
-  const divInfo = getDivisionForTrophies(currentPlayer?.trophies || 0);
-  const filteredPlayers = leaderboard.filter((p) =>
-    p.username.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  // Helper to check real quest progress for currentPlayer
-  const getQuestProgress = (questId: string) => {
-    if (!currentPlayer) return { current: 0, target: 1, done: false };
-    if (questId === "quest_play_2") {
-      return {
-        current: Math.min(2, currentPlayer.totalGames),
-        target: 2,
-        done: currentPlayer.totalGames >= 2,
-      };
-    }
-    if (questId === "quest_orders_8") {
-      return {
-        current: currentPlayer.totalGames >= 1 ? 1 : 0,
-        target: 1,
-        done: currentPlayer.totalGames >= 1,
-      };
-    }
-    if (questId === "quest_beat_ai") {
-      return {
-        current: Math.min(1, currentPlayer.wins),
-        target: 1,
-        done: currentPlayer.wins >= 1,
-      };
-    }
-    if (questId === "quest_fast_win") {
-      const fast =
-        currentPlayer.fastestWinTurns !== null &&
-        currentPlayer.fastestWinTurns <= 6;
-      return {
-        current: fast ? 1 : 0,
-        target: 1,
-        done: fast,
-      };
-    }
-    return { current: 0, target: 1, done: false };
+  const playAgainOnline = () => {
+    setScreen("home");
+    setGameConfig(null);
+    setTimeout(() => {
+      startOnlineAction("quick_match", lastTimer || 45).catch((e) => showToast(e.message || "Matchmaking failed", "err"));
+    }, 250);
   };
+
+  const finishTutorial = async (goTo: "bot" | "home" | "skip") => {
+    setShowTutorial(false);
+    if (me && !me.tutorialSeen) {
+      if (session?.isGuest || !token) {
+        const updated = { ...me, tutorialSeen: true, coins: me.coins + (goTo === "skip" ? 0 : 50) };
+        saveGuestProfile(updated); setMe(updated);
+      } else {
+        try {
+          const res = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "mark_tutorial", token }) });
+          const data = await res.json();
+          if (data.player) setMe({ ...data.player, avatarConfig: normalizeAvatar(data.player.avatarConfig) });
+        } catch {}
+      }
+    }
+    if (goTo === "bot") startAI("Rookie", 45);
+  };
+
+  /* ------------------------------ render ------------------------------ */
+  if (screen === "boot") {
+    return (
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-3">
+        <Character config={{ base: "owl", color: "classic", accessory: "crown" }} mood="happy" size={130} />
+        <p className="font-display font-bold text-2xl tracking-wide">CIPHER CLASH</p>
+        <p className="font-bold text-sm" style={{ color: "var(--ink-soft)" }}>Loading your arena...</p>
+      </div>
+    );
+  }
+
+  if (screen === "welcome" || !me) {
+    return <Welcome doAuth={doAuth} showToast={showToast} toasts={toasts} />;
+  }
+
+  if (screen === "game" && gameConfig) {
+    return (
+      <>
+        <GameBoard
+          me={me}
+          config={gameConfig}
+          onExit={() => { setScreen("home"); setGameConfig(null); setRoomResume(loadRoomSession()); refreshState(); }}
+          onResult={handleResult}
+          onPlayAgainOnline={playAgainOnline}
+          showToast={showToast}
+        />
+        <Toasts toasts={toasts} />
+      </>
+    );
+  }
+
+  const dc = getDailyChallenge();
+  const dailyDone = me.dailyChallengeDone === dc.dateKey;
+  const today = localToday();
+  const stats = me.dailyStats?.date === today ? me.dailyStats : emptyDailyStats(today);
+  const div = getDivisionForTrophies(me.trophies);
+  const next = nextDivision(me.trophies);
+  const divProgress = next ? Math.min(100, ((me.trophies - div.minTrophies) / Math.max(1, next.minTrophies - div.minTrophies)) * 100) : 100;
+  const myRank = leaderboard.findIndex((r) => r.id === me.id);
 
   return (
-    <div className="min-h-screen bg-[#FFFDF7] text-[#2B2D42] flex flex-col">
-      {/* Floating Toast Notification */}
-      {toast && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-[#2B2D42] text-white font-display font-bold text-xs shadow-xl border-b-4 border-black flex items-center gap-2 animate-pop-in">
-          <Sparkles className="w-4 h-4 text-[#FFC800]" />
-          <span>{toast}</span>
-        </div>
-      )}
+    <div className="min-h-[100dvh]">
+      {/* ---- HUD ---- */}
+      <header className="sticky top-0 z-40" style={{ background: "var(--hud-bg)", backdropFilter: "blur(12px)", borderBottom: "2px solid var(--border)" }}>
+        <div className="max-w-6xl mx-auto px-3 sm:px-5 py-2 flex items-center gap-2">
+          <button onClick={() => { setShowProfile(true); soundEngine.playTap(520); }} className="flex items-center gap-2 min-w-0 active:scale-95 transition-transform">
+            <CharacterAvatar config={me.avatarConfig} frameId={me.frameId} size={44} ringWidth={3} />
+            <span className="text-left min-w-0">
+              <span className="block font-display font-semibold leading-none truncate max-w-[110px]">{me.username}</span>
+              <span className="block mt-1 w-24 h-2.5 rounded-full overflow-hidden" style={{ background: "var(--surface-3)", border: "1.5px solid var(--border)" }}>
+                <span className="block h-full rounded-full" style={{ width: `${(me.xp % 200) / 2}%`, background: "var(--purple)" }} />
+              </span>
+              <span className="block text-[9px] font-black" style={{ color: "var(--ink-faint)" }}>LEVEL {me.level}</span>
+            </span>
+          </button>
 
-      {/* TOP HUD BAR */}
-      <header className="sticky top-0 z-40 bg-[#FFFDF7]/95 backdrop-blur-md border-b-2 border-[#E5E0D5]">
-        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-2">
-          {/* Player Profile Pill or Sign-In Prompt */}
-          <div className="flex items-center gap-2.5">
-            {currentPlayer ? (
-              <button
-                onClick={() => {
-                  soundEngine.playTap(500);
-                  setInspectedPlayer(currentPlayer);
-                }}
-                className="flex items-center gap-2.5 p-1 pr-3 rounded-2xl bg-[#F3F0E6] hover:bg-[#E5E0D5] border-2 border-[#E5E0D5] transition"
-              >
-                <div
-                  className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg ${getFrameClasses(
-                    currentPlayer.frameId
-                  )}`}
-                >
-                  {currentPlayer.avatarEmoji}
-                </div>
-                <div className="text-left">
-                  <div className="text-xs font-display font-bold text-[#2B2D42] leading-tight flex items-center gap-1">
-                    <span>{currentPlayer.username}</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-[#58CC02] text-white font-black">
-                      Lv.{currentPlayer.level}
-                    </span>
-                  </div>
-                  <div className="text-[10px] font-extrabold text-[#6C757D] flex items-center gap-1">
-                    <span>{divInfo.badgeEmoji}</span>
-                    <span>{divInfo.name}</span>
-                    <span>• {currentPlayer.trophies} 🏆</span>
-                  </div>
-                </div>
-              </button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-[#58CC02] text-white flex items-center justify-center text-lg font-bold shadow-xs">
-                  🔐
-                </div>
-                <div>
-                  <div className="text-sm font-display font-bold text-[#2B2D42] leading-none">
-                    Code Clash
-                  </div>
-                  <div className="text-[10px] font-extrabold text-[#6C757D]">
-                    4-Digit Code Breaker
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          <div className="flex-1" />
 
-          {/* Right Currencies & Controls */}
-          <div className="flex items-center gap-2">
-            {currentPlayer && (
-              <>
-                <div
-                  onClick={() => setActiveNav("shop")}
-                  className="cursor-pointer px-2.5 py-1.5 rounded-xl bg-orange-50 border-2 border-orange-200 text-[#FF9600] font-display font-bold text-xs flex items-center gap-1"
-                  title="Daily Streak"
-                >
-                  <Flame className="w-4 h-4 fill-[#FF9600]" />
-                  <span>{currentPlayer.streakDays}</span>
-                </div>
-
-                <div
-                  onClick={() => setActiveNav("shop")}
-                  className="cursor-pointer px-2.5 py-1.5 rounded-xl bg-amber-50 border-2 border-amber-200 text-[#D97706] font-display font-bold text-xs flex items-center gap-1"
-                  title="Clash Coins"
-                >
-                  <span>🪙</span>
-                  <span>{currentPlayer.coins}</span>
-                </div>
-
-                <div
-                  onClick={() => setActiveNav("shop")}
-                  className="hidden sm:flex cursor-pointer px-2.5 py-1.5 rounded-xl bg-purple-50 border-2 border-purple-200 text-[#9333EA] font-display font-bold text-xs items-center gap-1"
-                  title="Royal Gems"
-                >
-                  <span>💎</span>
-                  <span>{currentPlayer.gems}</span>
-                </div>
-              </>
-            )}
-
-            <button
-              onClick={() => setShowHowToPlay(!showHowToPlay)}
-              className="px-2.5 py-1.5 rounded-xl bg-[#F3F0E6] hover:bg-[#E5E0D5] border-2 border-[#E5E0D5] text-xs font-extrabold text-[#2B2D42] flex items-center gap-1"
-              title="How to Play Guide"
-            >
-              <HelpCircle className="w-4 h-4 text-[#1CB0F6]" />
-              <span className="hidden sm:inline">Guide</span>
-            </button>
-
-            <button
-              onClick={() => {
-                const nextMuted = soundEngine.toggleMute();
-                setMuted(nextMuted);
-              }}
-              className="w-9 h-9 rounded-xl bg-[#F3F0E6] hover:bg-[#E5E0D5] border-2 border-[#E5E0D5] flex items-center justify-center text-[#2B2D42]"
-              title={muted ? "Unmute" : "Mute"}
-            >
-              {muted ? (
-                <VolumeX className="w-4 h-4 text-[#FF4B4B]" />
-              ) : (
-                <Volume2 className="w-4 h-4 text-[#58CC02]" />
-              )}
-            </button>
-          </div>
+          <span className="chip px-2.5 py-1.5 font-black text-sm flex items-center gap-1" title={`${me.streakDays}-day streak`}>
+            <Flame size={16} className="animate-flame" style={{ color: "#FF7A18" }} fill="#FF7A18" /> {me.streakDays}
+          </span>
+          <button onClick={() => setScreen("rank")} className="chip px-2.5 py-1.5 font-black text-sm flex items-center gap-1 active:scale-95 transition-transform" title="Trophies — view rankings">
+            <Trophy size={16} style={{ color: "#E0A800" }} /> {me.trophies.toLocaleString()}
+          </button>
+          <span className="chip px-2.5 py-1.5 font-black text-sm hidden sm:flex items-center gap-1" title="Coins">
+            <Coins size={16} style={{ color: "#E0A800" }} /> {me.coins.toLocaleString()}
+          </span>
+          <span className="chip px-2.5 py-1.5 font-black text-sm hidden sm:flex items-center gap-1" title="Gems">
+            <Gem size={16} style={{ color: "#1CB0F6" }} /> {me.gems.toLocaleString()}
+          </span>
+          <button onClick={() => setTheme(!isDark)} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center" title={isDark ? "Switch to light mode" : "Switch to dark mode"}>
+            {isDark ? <Sun size={17} strokeWidth={2.6} /> : <Moon size={17} strokeWidth={2.6} />}
+          </button>
+          <button onClick={() => setShowSettings(true)} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center" title="Settings">
+            <Settings size={17} strokeWidth={2.6} />
+          </button>
         </div>
       </header>
 
-      {/* COLLAPSIBLE VISUAL "HOW TO PLAY" GUIDE */}
-      {showHowToPlay && (
-        <div className="max-w-5xl w-full mx-auto px-4 pt-3">
-          <div className="bg-amber-50 rounded-3xl p-4 border-2 border-[#FFC800] space-y-2 animate-pop-in">
-            <div className="flex items-center justify-between">
-              <h3 className="font-display font-bold text-sm text-[#2B2D42]">
-                🎓 How to Play Code Clash in 3 Simple Steps
-              </h3>
-              <button
-                onClick={() => setShowHowToPlay(false)}
-                className="text-xs font-extrabold text-[#6C757D] hover:text-[#2B2D42]"
-              >
-                Close ✕
-              </button>
+      {screen === "home" && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-5 py-4 pb-14">
+          {/* resume banner */}
+          {roomResume && (
+            <div className="card-game p-3 mb-3 flex items-center gap-3 animate-pop" style={{ borderColor: "var(--gold)" }}>
+              <span className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0" style={{ background: "var(--gold-dark)" }}>
+                <Swords size={19} strokeWidth={2.6} />
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="font-display font-semibold leading-tight">Match in progress — room {roomResume.roomCode}</p>
+                <p className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Jump back in before your rival claims the win!</p>
+              </div>
+              <button onClick={() => { saveRoomSession(null); setRoomResume(null); }} className="btn-game btn-ghost px-3 py-2 text-xs">Discard</button>
+              <button onClick={() => enterOnline(roomResume)} className="btn-game btn-gold px-4 py-2.5">Rejoin</button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-              <div className="bg-white p-3 rounded-2xl border border-[#E5E0D5]">
-                <div className="font-display font-bold text-[#58CC02] mb-1">
-                  1. Pick 4 Unique Digits
-                </div>
-                <p className="text-[#6C757D] font-semibold">
-                  Both players create a secret 4-digit code using unique digits from <strong>1 to 9</strong> (no repeats, no zero).
-                </p>
-              </div>
-              <div className="bg-white p-3 rounded-2xl border border-[#E5E0D5]">
-                <div className="font-display font-bold text-[#D97706] mb-1">
-                  2. Read Points & Orders
-                </div>
-                <p className="text-[#6C757D] font-semibold">
-                  After every guess you get <strong>Points</strong> (correct digits anywhere) and <strong>Orders</strong> (digits in the exact right position).
-                </p>
-              </div>
-              <div className="bg-white p-3 rounded-2xl border border-[#E5E0D5]">
-                <div className="font-display font-bold text-[#1CB0F6] mb-1">
-                  3. Reach 4P + 4O First!
-                </div>
-                <p className="text-[#6C757D] font-semibold">
-                  Use the clues to deduce the code. First player to hit <strong>4 Points + 4 Orders</strong> wins!
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MAIN CONTAINER */}
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 pt-4 pb-28 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT / PRIMARY COLUMN */}
-        <div className="lg:col-span-7 space-y-5">
-          {inArena ? (
-            <CodeClashArena
-              mode={arenaMode}
-              aiDifficulty={selectedAiDifficulty}
-              timerOption={selectedTimer}
-              player1Id={currentPlayer?.id}
-              player1Name={currentPlayer?.username || "Guest"}
-              player1Avatar={currentPlayer?.avatarEmoji || onboardingEmoji}
-              player2Name={arenaOpponentName}
-              player2Avatar={arenaOpponentAvatar}
-              roomCode={activeRoomCode}
-              isPlayer2Seat={isPlayer2Seat}
-              tournamentId={activeTournament?.id}
-              tournamentName={activeTournament?.name}
-              tournamentSecret={activeTournament?.secretCode}
-              themeId={currentPlayer?.themeId || "theme_classic"}
-              onMatchComplete={handleMatchComplete}
-              onExitArena={() => {
-                soundEngine.playTap(420);
-                setInArena(false);
-                setActiveTournament(null);
-                fetchGameState(currentPlayer?.id);
-              }}
-            />
-          ) : (
-            <>
-              {/* STEP 1 FOR NEW VISITORS: REAL ACCOUNT / GUEST SETUP CARD */}
-              {!currentPlayer && !loading && (
-                <section className="bg-white rounded-3xl p-5 border-2 border-[#58CC02] border-b-[6px] shadow-sm space-y-4 animate-pop-in">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <span className="px-2.5 py-0.5 rounded-full bg-lime-100 text-[#46A302] text-[11px] font-black uppercase">
-                        👋 Step 1: Welcome to Code Clash
-                      </span>
-                      <h2 className="text-xl font-display font-bold text-[#2B2D42] mt-1">
-                        Create Your Profile or Play as Guest
-                      </h2>
-                      <p className="text-xs font-semibold text-[#6C757D]">
-                        All stats, rankings, and matches are 100% real and saved to the database.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleAuthAction({ mode: "guest", avatarEmoji: onboardingEmoji })}
-                      className="px-4 py-2.5 rounded-2xl bg-[#FFC800] text-[#2B2D42] font-display font-bold text-xs border-b-4 border-[#E5B400] btn-tactile shrink-0"
-                    >
-                      ⚡ Instant Guest Play
-                    </button>
-                  </div>
-
-                  <form onSubmit={handleOnboardingSubmit} className="space-y-3">
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase text-[#6C757D] mb-1.5">
-                        Pick Your Avatar
-                      </label>
-                      <div className="flex gap-2 flex-wrap">
-                        {STARTER_AVATARS.map((emo) => (
-                          <button
-                            type="button"
-                            key={emo}
-                            onClick={() => setOnboardingEmoji(emo)}
-                            className={`w-10 h-10 rounded-xl text-xl flex items-center justify-center border-2 transition ${
-                              onboardingEmoji === emo
-                                ? "bg-lime-100 border-[#58CC02] scale-105"
-                                : "bg-[#F3F0E6] border-[#E5E0D5]"
-                            }`}
-                          >
-                            {emo}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <input
-                        type="text"
-                        value={onboardingName}
-                        onChange={(e) => setOnboardingName(e.target.value)}
-                        placeholder="Choose a Username"
-                        className="px-3.5 py-2.5 rounded-xl bg-[#F3F0E6] border-2 border-[#E5E0D5] text-xs font-bold focus:outline-none focus:border-[#58CC02]"
-                      />
-                      <input
-                        type="password"
-                        value={onboardingPassword}
-                        onChange={(e) => setOnboardingPassword(e.target.value)}
-                        placeholder="Password (optional for Guest)"
-                        className="px-3.5 py-2.5 rounded-xl bg-[#F3F0E6] border-2 border-[#E5E0D5] text-xs font-bold focus:outline-none focus:border-[#58CC02]"
-                      />
-                    </div>
-
-                    {onboardingError && (
-                      <p className="text-xs font-extrabold text-[#FF4B4B]">
-                        {onboardingError}
-                      </p>
-                    )}
-
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="submit"
-                        onClick={() => setOnboardingMode("register")}
-                        className="flex-1 py-3 rounded-2xl bg-[#58CC02] text-white font-display font-bold text-xs border-b-4 border-[#46A302] btn-tactile"
-                      >
-                        Create Account & Start
-                      </button>
-                      <button
-                        type="submit"
-                        onClick={() => setOnboardingMode("login")}
-                        className="px-4 py-3 rounded-2xl bg-[#1CB0F6] text-white font-display font-bold text-xs border-b-4 border-[#1899D6] btn-tactile"
-                      >
-                        Log In
-                      </button>
-                    </div>
-                  </form>
-                </section>
-              )}
-
-              {/* TAB 1: GUIDED PLAY HUB */}
-              {activeNav === "play" && (
-                <div className="space-y-5 animate-pop-in">
-                  {/* Network + Install strip */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-extrabold border-2 ${
-                        isOnlineNet
-                          ? "bg-emerald-50 border-emerald-300 text-emerald-700"
-                          : "bg-amber-50 border-amber-300 text-amber-800"
-                      }`}
-                    >
-                      <span className={`w-2 h-2 rounded-full ${isOnlineNet ? "bg-emerald-500" : "bg-amber-500"}`} />
-                      {isOnlineNet ? "Online — ranks sync live" : "Offline — games queue for sync"}
-                    </span>
-                    {deferredInstall && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            deferredInstall.prompt();
-                            await deferredInstall.userChoice;
-                            setDeferredInstall(null);
-                            showToast("📲 App installed — play offline anytime!");
-                          } catch {}
-                        }}
-                        className="px-3 py-1.5 rounded-full bg-[#1CB0F6] text-white text-[11px] font-extrabold border-b-3 border-[#1899D6] btn-tactile"
-                      >
-                        📲 Install App
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Daily Challenge */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      soundEngine.playTap(620);
-                      if (dailyChallenge.rule === "hard_ai_only") {
-                        handleStartAIMatch("Mastermind");
-                      } else if (dailyChallenge.rule === "speed_30") {
-                        handleStartAIMatch("Tactician");
-                      } else {
-                        handleStartAIMatch("Rookie");
-                      }
-                      showToast(`${dailyChallenge.icon} ${dailyChallenge.title} — ${dailyChallenge.description}`);
-                    }}
-                    className="w-full text-left rounded-3xl p-4 border-2 border-[#CE82FF] border-b-[6px] bg-gradient-to-br from-purple-50 to-fuchsia-50 hover:brightness-105 transition"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-[#CE82FF] text-white flex items-center justify-center text-2xl shrink-0">
-                        {dailyChallenge.icon}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[10px] font-black uppercase tracking-wider text-[#CE82FF]">
-                            Daily Challenge
-                          </span>
-                          <span className="text-[10px] font-bold text-[#6C757D]">
-                            {dailyChallenge.dateKey}
-                          </span>
-                          <span className="text-[10px] font-black text-amber-600">
-                            ×{dailyChallenge.bonusMultiplier} rewards
-                          </span>
-                        </div>
-                        <h3 className="font-display font-bold text-[#2B2D42] text-base">
-                          {dailyChallenge.title}
-                        </h3>
-                        <p className="text-xs font-semibold text-[#6C757D] mt-0.5 break-safe">
-                          {dailyChallenge.description}
-                        </p>
-                      </div>
-                      <span className="text-[#CE82FF] font-black text-sm shrink-0">Play →</span>
-                    </div>
-                  </button>
-
-                  {/* Guided 3-Step Journey Banner */}
-                  <div className="rounded-3xl bg-gradient-to-br from-[#58CC02] to-[#46A302] text-white p-5 border-b-[6px] border-[#388402] shadow-md space-y-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-black/20 text-[11px] font-black uppercase">
-                          <Compass className="w-3.5 h-3.5" /> Guided Journey
-                        </div>
-                        <h1 className="text-2xl font-display font-bold leading-tight">
-                          {!currentPlayer
-                            ? "Step 1: Pick a Mode or Start Warmup!"
-                            : currentPlayer.totalGames === 0
-                            ? `Welcome, ${currentPlayer.username}! Play Your First Match`
-                            : `Ready for Your Next Duel, ${currentPlayer.username}?`}
-                        </h1>
-                        <p className="text-xs font-bold text-white/90">
-                          Guess your opponent&apos;s 4 unique digits (1–9). First to{" "}
-                          <span className="underline decoration-[#FFC800] decoration-2">
-                            4 Points + 4 Orders
-                          </span>{" "}
-                          wins!
-                        </p>
-                      </div>
-
-                      <button
-                        onClick={() => handleStartAIMatch("Rookie")}
-                        className="px-4 py-3 rounded-2xl bg-[#FFC800] text-[#2B2D42] font-display font-bold text-xs border-b-4 border-[#E5B400] btn-tactile shrink-0 flex items-center gap-1.5 shadow-sm"
-                      >
-                        <Play className="w-4 h-4 fill-[#2B2D42]" />
-                        <span>Quick Warmup</span>
-                      </button>
-                    </div>
-
-                    {/* Guided Progress Steps */}
-                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/20 text-xs">
-                      <div className="bg-black/20 rounded-xl p-2 flex items-center gap-2">
-                        <CheckCircle2
-                          className={`w-4 h-4 shrink-0 ${
-                            currentPlayer ? "text-[#FFC800]" : "text-white/50"
-                          }`}
-                        />
-                        <span className="font-bold truncate">1. Profile Ready</span>
-                      </div>
-                      <div className="bg-black/20 rounded-xl p-2 flex items-center gap-2">
-                        <CheckCircle2
-                          className={`w-4 h-4 shrink-0 ${
-                            (currentPlayer?.totalGames || 0) > 0
-                              ? "text-[#FFC800]"
-                              : "text-white/50"
-                          }`}
-                        />
-                        <span className="font-bold truncate">2. First Match</span>
-                      </div>
-                      <div className="bg-black/20 rounded-xl p-2 flex items-center gap-2">
-                        <CheckCircle2
-                          className={`w-4 h-4 shrink-0 ${
-                            (currentPlayer?.wins || 0) > 0
-                              ? "text-[#FFC800]"
-                              : "text-white/50"
-                          }`}
-                        />
-                        <span className="font-bold truncate">3. First Victory</span>
-                      </div>
-                    </div>
-
-                    {/* Turn Timer Selector */}
-                    <div className="pt-2 border-t border-white/20 flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-[11px] font-black uppercase text-white/90 flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5" /> Turn Timer:
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {TIMER_OPTIONS.map((opt) => (
-                          <button
-                            key={opt.value}
-                            onClick={() => {
-                              soundEngine.playTap(500);
-                              setSelectedTimer(opt.value);
-                            }}
-                            className={`py-1 px-2.5 rounded-xl text-xs font-display font-bold transition border-b-2 ${
-                              selectedTimer === opt.value
-                                ? "bg-[#FFC800] text-[#2B2D42] border-[#E5B400]"
-                                : "bg-black/20 text-white border-black/30 hover:bg-black/30"
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* CLEAN 4-MODE SELECTOR PILLS */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {[
-                      { id: "ai", label: "🤖 vs AI", desc: "4 Smart Tiers" },
-                      {
-                        id: "online_1v1",
-                        label: "🌍 Online 1v1",
-                        desc: "Live Rooms",
-                      },
-                      {
-                        id: "hotseat",
-                        label: "📱 Pass & Play",
-                        desc: "1 Phone",
-                      },
-                      {
-                        id: "local_offline",
-                        label: "📡 2-Phone",
-                        desc: "Local Link",
-                      },
-                    ].map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => {
-                          soundEngine.playTap(480);
-                          setSelectedPlayTab(
-                            m.id as
-                              | "ai"
-                              | "online_1v1"
-                              | "hotseat"
-                              | "local_offline"
-                          );
-                        }}
-                        className={`p-3 rounded-2xl border-2 border-b-4 text-left transition btn-tactile ${
-                          selectedPlayTab === m.id
-                            ? "bg-white border-[#58CC02] shadow-xs"
-                            : "bg-[#F3F0E6] border-[#E5E0D5] text-[#6C757D]"
-                        }`}
-                      >
-                        <div className="text-sm font-display font-bold text-[#2B2D42]">
-                          {m.label}
-                        </div>
-                        <div className="text-[11px] font-bold text-[#6C757D]">
-                          {m.desc}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* FOCUSED MODE VIEW 1: VS AI */}
-                  {selectedPlayTab === "ai" && (
-                    <section className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-3.5 animate-pop-in">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h2 className="text-lg font-display font-bold text-[#2B2D42] flex items-center gap-2">
-                            <Bot className="w-5 h-5 text-[#58CC02]" />
-                            <span>Choose Your AI Opponent</span>
-                          </h2>
-                          <p className="text-xs font-semibold text-[#6C757D]">
-                            Start with <strong>Rookie</strong> to learn the ropes, then work your way up to <strong>Oracle</strong>!
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {(
-                          [
-                            "Rookie",
-                            "Tactician",
-                            "Mastermind",
-                            "Oracle",
-                          ] as AIDifficulty[]
-                        ).map((diff) => {
-                          const bot = AI_PROFILES[diff];
-                          return (
-                            <div
-                              key={diff}
-                              className="p-3.5 rounded-2xl bg-[#F3F0E6] border-2 border-[#E5E0D5] flex flex-col justify-between gap-3 hover:border-[#1CB0F6] transition"
-                            >
-                              <div className="flex items-start gap-3">
-                                <div
-                                  className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 text-white shadow-xs"
-                                  style={{ backgroundColor: bot.color }}
-                                >
-                                  {bot.emoji}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1.5">
-                                    <span
-                                      className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase text-white"
-                                      style={{ backgroundColor: bot.color }}
-                                    >
-                                      {diff}
-                                    </span>
-                                    <span className="text-[11px] font-extrabold text-[#6C757D]">
-                                      +{bot.rewardCoins} 🪙
-                                    </span>
-                                  </div>
-                                  <div className="text-sm font-display font-bold text-[#2B2D42] mt-0.5">
-                                    {bot.name}
-                                  </div>
-                                  <p className="text-[11px] font-semibold text-[#6C757D] leading-snug">
-                                    {bot.tagline}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <button
-                                onClick={() => handleStartAIMatch(diff)}
-                                style={{
-                                  backgroundColor: bot.color,
-                                  borderColor: bot.borderColor,
-                                }}
-                                className="w-full py-2.5 rounded-xl text-white font-display font-bold text-xs border-b-4 btn-tactile flex items-center justify-center gap-1.5"
-                              >
-                                <Play className="w-3.5 h-3.5 fill-white" />
-                                <span>Play vs {diff}</span>
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  )}
-
-                  {/* FOCUSED MODE VIEW 2: ONLINE 1V1 */}
-                  {selectedPlayTab === "online_1v1" && (
-                    <section className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-4 animate-pop-in">
-                      <div>
-                        <h2 className="text-lg font-display font-bold text-[#2B2D42] flex items-center gap-2">
-                          <Swords className="w-5 h-5 text-[#1CB0F6]" />
-                          <span>Online 1v1 Multiplayer</span>
-                        </h2>
-                        <p className="text-xs font-semibold text-[#6C757D]">
-                          Create a room to get a 1v1 Room Code, or enter a friend&apos;s Room Code to join immediately.
-                        </p>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <button
-                          onClick={() =>
-                            handleCreateOrChallengeOnline(
-                              undefined,
-                              "online_1v1"
-                            )
-                          }
-                          className="py-3 px-4 rounded-2xl bg-[#1CB0F6] text-white font-display font-bold text-xs border-b-4 border-[#1899D6] btn-tactile flex items-center justify-center gap-2"
-                        >
-                          <Plus className="w-4 h-4" /> Create 1v1 Room
-                        </button>
-
-                        <div className="flex gap-1.5">
-                          <input
-                            type="text"
-                            value={joinRoomInput}
-                            onChange={(e) => setJoinRoomInput(e.target.value)}
-                            placeholder="Enter Room Code"
-                            className="flex-1 min-w-0 px-3 py-2 rounded-2xl bg-[#F3F0E6] border-2 border-[#E5E0D5] font-code text-xs font-bold uppercase focus:outline-none focus:border-[#1CB0F6]"
-                          />
-                          <button
-                            onClick={() =>
-                              handleJoinRoomByCode(joinRoomInput, "online_1v1")
-                            }
-                            className="px-4 py-2 rounded-2xl bg-[#58CC02] text-white font-display font-bold text-xs border-b-4 border-[#46A302] btn-tactile"
-                          >
-                            Join
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Real Online Players List */}
-                      <div className="space-y-2 pt-2 border-t border-[#E5E0D5]">
-                        <div className="text-xs font-extrabold uppercase tracking-wider text-[#6C757D]">
-                          🌍 Online Players ({leaderboard.filter((p) => p.isOnline && p.id !== currentPlayer?.id).length})
-                        </div>
-                        {leaderboard.filter(
-                          (p) => p.isOnline && p.id !== currentPlayer?.id
-                        ).length === 0 ? (
-                          <div className="p-4 rounded-2xl bg-[#F3F0E6] text-center text-xs font-semibold text-[#6C757D]">
-                            No other players are online right now. Tap <strong>Create 1v1 Room</strong> above and share the code with a friend!
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {leaderboard
-                              .filter(
-                                (p) => p.isOnline && p.id !== currentPlayer?.id
-                              )
-                              .map((rival) => {
-                                const rDiv = getDivisionForTrophies(
-                                  rival.trophies
-                                );
-                                return (
-                                  <div
-                                    key={rival.id}
-                                    className="p-2.5 rounded-2xl bg-[#F3F0E6] border-2 border-[#E5E0D5] flex items-center justify-between gap-2"
-                                  >
-                                    <div
-                                      onClick={() => setInspectedPlayer(rival)}
-                                      className="flex items-center gap-2.5 cursor-pointer min-w-0"
-                                    >
-                                      <div className="w-10 h-10 rounded-xl bg-white border border-[#E5E0D5] flex items-center justify-center text-xl">
-                                        {rival.avatarEmoji}
-                                      </div>
-                                      <div className="min-w-0">
-                                        <div className="text-xs font-extrabold text-[#2B2D42] truncate">
-                                          {rival.username}
-                                        </div>
-                                        <div className="text-[10px] font-bold text-[#6C757D]">
-                                          {rDiv.badgeEmoji} {rival.division} •{" "}
-                                          {rival.trophies} 🏆
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    <button
-                                      onClick={() =>
-                                        handleCreateOrChallengeOnline(
-                                          rival,
-                                          "online_1v1"
-                                        )
-                                      }
-                                      className="px-3 py-2 rounded-xl bg-[#58CC02] text-white font-display font-bold text-[11px] border-b-3 border-[#46A302] btn-tactile shrink-0"
-                                    >
-                                      ⚔️ Challenge
-                                    </button>
-                                  </div>
-                                );
-                              })}
-                          </div>
-                        )}
-                      </div>
-                    </section>
-                  )}
-
-                  {/* FOCUSED MODE VIEW 3: HOTSEAT (PASS & PLAY) */}
-                  {selectedPlayTab === "hotseat" && (
-                    <section className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-4 animate-pop-in">
-                      <div className="flex items-start gap-3">
-                        <div className="w-12 h-12 rounded-2xl bg-amber-100 border-2 border-[#FFC800] flex items-center justify-center text-2xl shrink-0">
-                          📱🤝
-                        </div>
-                        <div>
-                          <h2 className="text-lg font-display font-bold text-[#2B2D42]">
-                            Pass & Play Hotseat (1 Phone)
-                          </h2>
-                          <p className="text-xs font-semibold text-[#6C757D]">
-                            Two players on the same device! Player 1 sets a secret code, then Player 2 sets theirs, and a privacy curtain protects secrets between turns.
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row gap-2.5">
-                        <input
-                          type="text"
-                          value={hotseatP2Name}
-                          onChange={(e) => setHotseatP2Name(e.target.value)}
-                          placeholder="Enter Player 2 Name"
-                          className="flex-1 px-4 py-3 rounded-2xl bg-[#F3F0E6] border-2 border-[#E5E0D5] text-xs font-bold"
-                        />
-                        <button
-                          onClick={handleStartHotseat}
-                          className="px-6 py-3 rounded-2xl bg-[#FFC800] text-[#2B2D42] font-display font-bold text-sm border-b-4 border-[#E5B400] btn-tactile"
-                        >
-                          Start Hotseat Match
-                        </button>
-                      </div>
-                    </section>
-                  )}
-
-                  {/* FOCUSED MODE VIEW 4: LOCAL 2-PHONE */}
-                  {selectedPlayTab === "local_offline" && (
-                    <section className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-4 animate-pop-in">
-                      <div className="flex items-start gap-3">
-                        <div className="w-12 h-12 rounded-2xl bg-purple-100 border-2 border-[#CE82FF] flex items-center justify-center text-2xl shrink-0">
-                          📡📲
-                        </div>
-                        <div>
-                          <h2 className="text-lg font-display font-bold text-[#2B2D42]">
-                            Local 2-Phone Duel (Same Network / Hotspot)
-                          </h2>
-                          <p className="text-xs font-semibold text-[#6C757D]">
-                            <strong>Step 1:</strong> Tap &quot;Host on Phone 1&quot; to get a local room code.<br />
-                            <strong>Step 2:</strong> Enter that code on Phone 2 to connect directly.
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <button
-                          onClick={() =>
-                            handleCreateOrChallengeOnline(
-                              undefined,
-                              "local_offline"
-                            )
-                          }
-                          className="py-3 px-4 rounded-2xl bg-[#CE82FF] text-white font-display font-bold text-xs border-b-4 border-[#A560E8] btn-tactile flex items-center justify-center gap-2"
-                        >
-                          <Smartphone className="w-4 h-4" /> Host on Phone 1
-                        </button>
-
-                        <div className="flex gap-1.5">
-                          <input
-                            type="text"
-                            value={joinRoomInput}
-                            onChange={(e) => setJoinRoomInput(e.target.value)}
-                            placeholder="Phone 1 Room Code"
-                            className="flex-1 min-w-0 px-3 py-2 rounded-2xl bg-[#F3F0E6] border-2 border-[#E5E0D5] font-code text-xs font-bold uppercase"
-                          />
-                          <button
-                            onClick={() =>
-                              handleJoinRoomByCode(
-                                joinRoomInput,
-                                "local_offline"
-                              )
-                            }
-                            className="px-4 py-2 rounded-2xl bg-[#58CC02] text-white font-display font-bold text-xs border-b-4 border-[#46A302] btn-tactile"
-                          >
-                            Connect Phone 2
-                          </button>
-                        </div>
-                      </div>
-                    </section>
-                  )}
-                </div>
-              )}
-
-              {/* TAB 2: RANKING DIVISIONS & SEASON PASS */}
-              {activeNav === "rank" && (
-                <div className="space-y-5 animate-pop-in">
-                  <div
-                    className={`rounded-3xl p-5 bg-gradient-to-r ${divInfo.bgGradient} text-white border-b-[6px] shadow-md`}
-                    style={{ borderColor: divInfo.borderColor }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="px-2.5 py-0.5 rounded-full bg-black/25 text-[11px] font-black uppercase">
-                          Your Competitive Rank
-                        </span>
-                        <h2 className="text-2xl font-display font-bold mt-1 flex items-center gap-2">
-                          <span>{divInfo.badgeEmoji}</span>
-                          <span>{divInfo.name} Division</span>
-                        </h2>
-                        <p className="text-xs font-bold text-white/90 mt-0.5">
-                          {currentPlayer?.trophies || 0} Trophies • Win Bonus: +
-                          {divInfo.winRewardCoins} Coins/Match
-                        </p>
-                      </div>
-                      <div className="text-5xl">{divInfo.badgeEmoji}</div>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-white/20 grid grid-cols-4 sm:grid-cols-8 gap-1.5 text-center">
-                      {DIVISIONS.map((d) => {
-                        const reached =
-                          (currentPlayer?.trophies || 0) >= d.minTrophies;
-                        return (
-                          <div
-                            key={d.name}
-                            className={`p-1.5 rounded-xl border ${
-                              d.name === divInfo.name
-                                ? "bg-white text-[#2B2D42] border-white font-black scale-105"
-                                : reached
-                                ? "bg-black/25 text-white border-white/30"
-                                : "bg-black/10 text-white/60 border-transparent"
-                            }`}
-                          >
-                            <div className="text-base">{d.badgeEmoji}</div>
-                            <div className="text-[9px] font-extrabold truncate">
-                              {d.name}
-                            </div>
-                            <div className="text-[8px] opacity-80">
-                              {d.minTrophies}+
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <section className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <div className="inline-flex items-center gap-1 text-[11px] font-black uppercase text-[#CE82FF]">
-                          <Crown className="w-3.5 h-3.5" /> Cosmetic Rewards Only • No Pay-to-Win
-                        </div>
-                        <h3 className="text-xl font-display font-bold text-[#2B2D42]">
-                          Season Pass
-                        </h3>
-                        <p className="text-xs font-bold text-[#6C757D]">
-                          Your Season XP:{" "}
-                          <span className="text-[#58CC02] font-black">
-                            {currentPlayer?.seasonXp || 0} XP
-                          </span>
-                        </p>
-                      </div>
-
-                      {!currentPlayer?.hasPremiumPass ? (
-                        <button
-                          onClick={handleUnlockPremiumPass}
-                          className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-[#CE82FF] to-[#9333EA] text-white font-display font-bold text-xs border-b-4 border-[#7E22CE] btn-tactile flex items-center gap-1.5 shadow-sm"
-                        >
-                          <Crown className="w-4 h-4 text-[#FFC800]" />
-                          <span>Unlock Royal Pass (80 💎)</span>
-                        </button>
-                      ) : (
-                        <span className="px-3 py-1.5 rounded-xl bg-purple-100 border-2 border-[#CE82FF] text-[#7E22CE] font-display font-bold text-xs flex items-center gap-1">
-                          <Crown className="w-4 h-4" /> Royal Pass Active
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="space-y-2.5">
-                      {SEASON_PASS_TIERS.map((tierObj) => {
-                        const unlocked =
-                          (currentPlayer?.seasonXp || 0) >= tierObj.xpRequired;
-                        const freeClaimed = (
-                          currentPlayer?.claimedFreeTiers || []
-                        ).includes(tierObj.tier);
-                        const premClaimed = (
-                          currentPlayer?.claimedPremiumTiers || []
-                        ).includes(tierObj.tier);
-
-                        return (
-                          <div
-                            key={tierObj.tier}
-                            className={`p-3 rounded-2xl border-2 transition grid grid-cols-12 items-center gap-2.5 ${
-                              unlocked
-                                ? "bg-lime-50/50 border-[#58CC02]/50"
-                                : "bg-[#F3F0E6] border-[#E5E0D5]"
-                            }`}
-                          >
-                            <div className="col-span-2 text-center">
-                              <div
-                                className={`w-10 h-10 mx-auto rounded-2xl font-display font-bold text-sm flex items-center justify-center border-b-3 ${
-                                  unlocked
-                                    ? "bg-[#58CC02] text-white border-[#46A302]"
-                                    : "bg-white text-[#6C757D] border-[#D6CFC0]"
-                                }`}
-                              >
-                                T{tierObj.tier}
-                              </div>
-                              <div className="text-[10px] font-extrabold text-[#6C757D] mt-0.5">
-                                {tierObj.xpRequired} XP
-                              </div>
-                            </div>
-
-                            <div className="col-span-5 bg-white p-2.5 rounded-xl border border-[#E5E0D5] flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-xl">
-                                  {tierObj.freeReward.icon}
-                                </span>
-                                <div className="min-w-0">
-                                  <div className="text-[10px] font-black uppercase text-[#58CC02]">
-                                    FREE
-                                  </div>
-                                  <div className="text-xs font-extrabold text-[#2B2D42] truncate">
-                                    {tierObj.freeReward.name}
-                                  </div>
-                                </div>
-                              </div>
-                              {freeClaimed ? (
-                                <span className="px-2 py-1 rounded-lg bg-lime-100 text-[#46A302] text-[10px] font-black">
-                                  ✓
-                                </span>
-                              ) : unlocked ? (
-                                <button
-                                  onClick={() =>
-                                    handleClaimPassTier(tierObj.tier, false)
-                                  }
-                                  className="px-2.5 py-1 rounded-lg bg-[#58CC02] text-white text-[10px] font-black border-b-2 border-[#46A302] btn-tactile"
-                                >
-                                  Claim
-                                </button>
-                              ) : (
-                                <Lock className="w-3.5 h-3.5 text-[#6C757D]" />
-                              )}
-                            </div>
-
-                            <div className="col-span-5 bg-purple-50/70 p-2.5 rounded-xl border border-purple-200 flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-xl">
-                                  {tierObj.premiumReward.icon}
-                                </span>
-                                <div className="min-w-0">
-                                  <div className="text-[10px] font-black uppercase text-[#9333EA]">
-                                    ROYAL
-                                  </div>
-                                  <div className="text-xs font-extrabold text-[#2B2D42] truncate">
-                                    {tierObj.premiumReward.name}
-                                  </div>
-                                </div>
-                              </div>
-                              {premClaimed ? (
-                                <span className="px-2 py-1 rounded-lg bg-purple-200 text-[#7E22CE] text-[10px] font-black">
-                                  ✓
-                                </span>
-                              ) : unlocked && currentPlayer?.hasPremiumPass ? (
-                                <button
-                                  onClick={() =>
-                                    handleClaimPassTier(tierObj.tier, true)
-                                  }
-                                  className="px-2.5 py-1 rounded-lg bg-[#CE82FF] text-white text-[10px] font-black border-b-2 border-[#A560E8] btn-tactile"
-                                >
-                                  Claim
-                                </button>
-                              ) : (
-                                <Lock className="w-3.5 h-3.5 text-[#9333EA]" />
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </section>
-                </div>
-              )}
-
-              {/* TAB 3: TOURNAMENTS (100% Real Player-Created Events) */}
-              {activeNav === "tournaments" && (
-                <div className="space-y-5 animate-pop-in">
-                  <div className="bg-gradient-to-r from-[#FFC800] to-[#FF9600] text-[#2B2D42] rounded-3xl p-5 border-b-[6px] border-[#D97706] flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <span className="px-2.5 py-0.5 rounded-full bg-black/10 text-[11px] font-black uppercase">
-                        🏆 Community & Private Tournaments
-                      </span>
-                      <h2 className="text-2xl font-display font-bold mt-1">
-                        Code Clash Tournaments
-                      </h2>
-                      <p className="text-xs font-bold text-[#2B2D42]/80">
-                        Host or join real Mass Code Hunts and 1v1 Bracket Duels!
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        soundEngine.playTap(540);
-                        setShowCreateTourney(!showCreateTourney);
-                      }}
-                      className="px-4 py-3 rounded-2xl bg-[#2B2D42] text-white font-display font-bold text-xs border-b-4 border-black btn-tactile flex items-center gap-1.5"
-                    >
-                      <Plus className="w-4 h-4 text-[#FFC800]" />
-                      <span>Host Tournament</span>
-                    </button>
-                  </div>
-
-                  {showCreateTourney && (
-                    <form
-                      onSubmit={handleCreateTournament}
-                      className="bg-white rounded-3xl p-5 border-2 border-[#FFC800] border-b-[6px] space-y-3.5 animate-pop-in"
-                    >
-                      <h3 className="text-base font-display font-bold text-[#2B2D42]">
-                        🛠️ Create a New Tournament
-                      </h3>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setNewTourneyType("mass_hunt")}
-                          className={`p-3 rounded-2xl border-2 text-left ${
-                            newTourneyType === "mass_hunt"
-                              ? "bg-lime-50 border-[#58CC02]"
-                              : "bg-[#F3F0E6] border-[#E5E0D5]"
-                          }`}
-                        >
-                          <div className="text-sm font-display font-bold">
-                            🏦 Mass Code Hunt
-                          </div>
-                          <div className="text-[11px] font-semibold text-[#6C757D]">
-                            Players race to crack the same 4-digit secret code.
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setNewTourneyType("bracket")}
-                          className={`p-3 rounded-2xl border-2 text-left ${
-                            newTourneyType === "bracket"
-                              ? "bg-sky-50 border-[#1CB0F6]"
-                              : "bg-[#F3F0E6] border-[#E5E0D5]"
-                          }`}
-                        >
-                          <div className="text-sm font-display font-bold">
-                            ⚔️ Bracket League
-                          </div>
-                          <div className="text-[11px] font-semibold text-[#6C757D]">
-                            1v1 elimination bracket where winners advance.
-                          </div>
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-extrabold text-[#6C757D] uppercase mb-1">
-                            Tournament Name
-                          </label>
-                          <input
-                            type="text"
-                            value={newTourneyName}
-                            onChange={(e) => setNewTourneyName(e.target.value)}
-                            placeholder="Enter Tournament Title"
-                            className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F0E6] border border-[#E5E0D5] text-xs font-bold"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-extrabold text-[#6C757D] uppercase mb-1">
-                            Secret Vault Code (Optional — Random if blank)
-                          </label>
-                          <input
-                            type="text"
-                            maxLength={4}
-                            value={newTourneySecret}
-                            onChange={(e) => setNewTourneySecret(e.target.value)}
-                            placeholder="4 unique digits (1-9)"
-                            className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F0E6] border border-[#E5E0D5] font-code text-xs font-bold"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-1">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setNewTourneyPrivate(!newTourneyPrivate)
-                          }
-                          className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 border-2 ${
-                            newTourneyPrivate
-                              ? "bg-purple-100 border-[#CE82FF] text-[#7E22CE]"
-                              : "bg-[#F3F0E6] border-[#E5E0D5] text-[#6C757D]"
-                          }`}
-                        >
-                          {newTourneyPrivate ? (
-                            <>
-                              <Lock className="w-3.5 h-3.5" /> Private (Invite Code)
-                            </>
-                          ) : (
-                            <>
-                              <Unlock className="w-3.5 h-3.5" /> Public Event
-                            </>
-                          )}
-                        </button>
-
-                        <button
-                          type="submit"
-                          className="px-5 py-2.5 rounded-2xl bg-[#58CC02] text-white font-display font-bold text-xs border-b-4 border-[#46A302] btn-tactile"
-                        >
-                          Launch Tournament
-                        </button>
-                      </div>
-                    </form>
-                  )}
-
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={privateInviteSearch}
-                      onChange={(e) => setPrivateInviteSearch(e.target.value)}
-                      placeholder="Enter Private Tournament Invite Code (if joining a private event)"
-                      className="flex-1 px-4 py-2.5 rounded-2xl bg-white border-2 border-[#E5E0D5] text-xs font-bold"
-                    />
-                  </div>
-
-                  {tournaments.length === 0 ? (
-                    <div className="bg-white rounded-3xl p-8 border-2 border-[#E5E0D5] text-center space-y-2">
-                      <div className="text-3xl">🏆</div>
-                      <h3 className="text-base font-display font-bold text-[#2B2D42]">
-                        No Live Tournaments Yet
-                      </h3>
-                      <p className="text-xs font-semibold text-[#6C757D] max-w-sm mx-auto">
-                        Tap <strong>Host Tournament</strong> above to launch the first Mass Code Hunt or Bracket League!
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {tournaments
-                        .filter(
-                          (t) =>
-                            !t.isPrivate ||
-                            !privateInviteSearch ||
-                            t.inviteCode
-                              ?.toLowerCase()
-                              .includes(privateInviteSearch.toLowerCase()) ||
-                            t.createdBy === currentPlayer?.username
-                        )
-                        .map((tourney) => (
-                          <div
-                            key={tourney.id}
-                            className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-4"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase text-white ${
-                                      tourney.type === "mass_hunt"
-                                        ? "bg-[#58CC02]"
-                                        : "bg-[#1CB0F6]"
-                                    }`}
-                                  >
-                                    {tourney.type === "mass_hunt"
-                                      ? "🏦 MASS CODE HUNT"
-                                      : "⚔️ BRACKET LEAGUE"}
-                                  </span>
-                                  {tourney.isPrivate && (
-                                    <span className="px-2 py-0.5 rounded-full bg-purple-100 text-[#7E22CE] text-[10px] font-black font-code">
-                                      🔒 CODE: {tourney.inviteCode}
-                                    </span>
-                                  )}
-                                </div>
-                                <h3 className="text-lg font-display font-bold text-[#2B2D42] mt-1">
-                                  {tourney.name}
-                                </h3>
-                                <p className="text-xs font-bold text-[#6C757D]">
-                                  Hosted by {tourney.createdBy} • Prize:{" "}
-                                  <span className="text-[#D97706]">
-                                    🪙 {tourney.prizeCoins}
-                                  </span>{" "}
-                                  +{" "}
-                                  <span className="text-[#9333EA]">
-                                    💎 {tourney.prizeGems}
-                                  </span>
-                                </p>
-                              </div>
-
-                              <button
-                                onClick={() =>
-                                  handleEnterTournamentMatch(tourney)
-                                }
-                                className="px-4 py-2.5 rounded-2xl bg-[#58CC02] text-white font-display font-bold text-xs border-b-4 border-[#46A302] btn-tactile flex items-center gap-1.5"
-                              >
-                                <Play className="w-3.5 h-3.5 fill-white" />
-                                <span>
-                                  {tourney.type === "mass_hunt"
-                                    ? "Crack Vault Now"
-                                    : "Enter Bracket"}
-                                </span>
-                              </button>
-                            </div>
-
-                            {tourney.type === "mass_hunt" && (
-                              <div className="bg-[#F3F0E6] rounded-2xl p-3 space-y-2">
-                                <div className="text-[11px] font-extrabold uppercase text-[#6C757D] flex justify-between">
-                                  <span>
-                                    Participants ({tourney.participants.length})
-                                  </span>
-                                  <span>Progress</span>
-                                </div>
-                                {tourney.participants.map((part, idx) => (
-                                  <div
-                                    key={idx}
-                                    className="bg-white rounded-xl px-3 py-2 flex items-center justify-between text-xs border border-[#E5E0D5]"
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-code font-black text-[#6C757D]">
-                                        #{idx + 1}
-                                      </span>
-                                      <span>{part.avatarEmoji}</span>
-                                      <span className="font-extrabold text-[#2B2D42]">
-                                        {part.username}
-                                      </span>
-                                    </div>
-                                    <div className="font-code font-bold">
-                                      {part.solved ? (
-                                        <span className="px-2 py-0.5 rounded-md bg-lime-100 text-[#46A302] text-[11px]">
-                                          ✓ CRACKED ({part.attempts} turns •{" "}
-                                          {part.timeSeconds}s)
-                                        </span>
-                                      ) : part.attempts > 0 ? (
-                                        <span className="px-2 py-0.5 rounded-md bg-amber-100 text-[#D97706] text-[11px]">
-                                          {part.bestPoints}P / {part.bestOrders}O (
-                                          {part.attempts} tries)
-                                        </span>
-                                      ) : (
-                                        <span className="text-[11px] text-[#6C757D]">
-                                          Joined
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {tourney.type === "bracket" &&
-                              tourney.bracketMatches.length > 0 && (
-                                <div className="grid grid-cols-1 gap-2.5 bg-[#F3F0E6] p-3 rounded-2xl">
-                                  {tourney.bracketMatches.map((duel) => (
-                                    <div
-                                      key={duel.id}
-                                      className="p-2.5 rounded-xl border-2 bg-white border-[#E5E0D5] space-y-1.5"
-                                    >
-                                      <div className="text-[10px] font-black uppercase text-[#6C757D] flex justify-between">
-                                        <span>{duel.label}</span>
-                                        <span>{duel.status.toUpperCase()}</span>
-                                      </div>
-                                      <div className="flex justify-between items-center text-xs font-extrabold">
-                                        <span>
-                                          {duel.player1Emoji} {duel.player1Name}
-                                        </span>
-                                        <span className="font-code px-1.5 py-0.5 rounded bg-[#F3F0E6]">
-                                          {duel.score1}
-                                        </span>
-                                      </div>
-                                      <div className="flex justify-between items-center text-xs font-extrabold">
-                                        <span>
-                                          {duel.player2Emoji} {duel.player2Name}
-                                        </span>
-                                        <span className="font-code px-1.5 py-0.5 rounded bg-[#F3F0E6]">
-                                          {duel.score2}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                          </div>
-                        ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* TAB 4: SOCIAL, PLAYER SEARCH & CLUBS (100% Real Data) */}
-              {activeNav === "social" && (
-                <div className="space-y-5 animate-pop-in">
-                  <div className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-4">
-                    <div>
-                      <h2 className="text-lg font-display font-bold text-[#2B2D42] flex items-center gap-2">
-                        <Users className="w-5 h-5 text-[#1CB0F6]" />
-                        <span>Player Directory & Friends</span>
-                      </h2>
-                      <p className="text-xs font-semibold text-[#6C757D]">
-                        Search real players by username to inspect their profile, follow them, or send a 1v1 challenge.
-                      </p>
-                    </div>
-
-                    <div className="relative">
-                      <Search className="w-4 h-4 text-[#6C757D] absolute left-3.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search players by username..."
-                        className="w-full pl-10 pr-4 py-3 rounded-2xl bg-[#F3F0E6] border-2 border-[#E5E0D5] text-xs font-bold focus:outline-none focus:border-[#1CB0F6]"
-                      />
-                    </div>
-
-                    {filteredPlayers.length === 0 ? (
-                      <div className="p-6 rounded-2xl bg-[#F3F0E6] text-center text-xs font-semibold text-[#6C757D]">
-                        No players found matching your search.
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {filteredPlayers.map((p) => {
-                          const pDiv = getDivisionForTrophies(p.trophies);
-                          const isFollowing = followingIds.includes(p.id);
-                          const isMe = p.id === currentPlayer?.id;
-
-                          return (
-                            <div
-                              key={p.id}
-                              className="p-3 rounded-2xl bg-[#F3F0E6] border-2 border-[#E5E0D5] flex items-center justify-between gap-2 hover:border-[#1CB0F6] transition"
-                            >
-                              <div
-                                onClick={() => {
-                                  soundEngine.playTap(480);
-                                  setInspectedPlayer(p);
-                                }}
-                                className="flex items-center gap-3 cursor-pointer min-w-0 flex-1"
-                              >
-                                <div
-                                  className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0 ${getFrameClasses(
-                                    p.frameId
-                                  )}`}
-                                >
-                                  {p.avatarEmoji}
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-sm font-display font-bold text-[#2B2D42] flex items-center gap-1.5">
-                                    <span className="truncate">
-                                      {p.username}
-                                    </span>
-                                    {isMe && (
-                                      <span className="px-1.5 py-0.5 rounded bg-[#58CC02] text-white text-[9px] font-black">
-                                        YOU
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-[11px] font-bold text-[#6C757D] flex items-center gap-2">
-                                    <span>
-                                      {pDiv.badgeEmoji} {p.division} (
-                                      {p.trophies} 🏆)
-                                    </span>
-                                    <span>
-                                      • {p.wins}W / {p.losses}L
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {!isMe && (
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    onClick={() => handleToggleFollow(p.id)}
-                                    className={`px-3 py-2 rounded-xl text-xs font-extrabold border-b-3 btn-tactile flex items-center gap-1 ${
-                                      isFollowing
-                                        ? "bg-white text-[#2B2D42] border-[#D6CFC0]"
-                                        : "bg-[#1CB0F6] text-white border-[#1899D6]"
-                                    }`}
-                                  >
-                                    {isFollowing ? (
-                                      <>
-                                        <UserCheck className="w-3.5 h-3.5" />{" "}
-                                        Following
-                                      </>
-                                    ) : (
-                                      <>
-                                        <UserPlus className="w-3.5 h-3.5" />{" "}
-                                        Follow
-                                      </>
-                                    )}
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      handleCreateOrChallengeOnline(
-                                        p,
-                                        "online_1v1"
-                                      )
-                                    }
-                                    className="px-3 py-2 rounded-xl bg-[#58CC02] text-white text-xs font-extrabold border-b-3 border-[#46A302] btn-tactile"
-                                  >
-                                    ⚔️
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* REAL CLUBS / TEAMS SECTION */}
-                  <div className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-lg font-display font-bold text-[#2B2D42] flex items-center gap-2">
-                          <Shield className="w-5 h-5 text-[#58CC02]" />
-                          <span>Clubs & Teams</span>
-                        </h3>
-                        <p className="text-xs font-semibold text-[#6C757D]">
-                          Create or join a player club. Club trophies equal the combined real trophies of all members!
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => setShowCreateClub(!showCreateClub)}
-                        className="px-3.5 py-2 rounded-xl bg-[#58CC02] text-white font-display font-bold text-xs border-b-3 border-[#46A302] btn-tactile"
-                      >
-                        + Create Club
-                      </button>
-                    </div>
-
-                    {showCreateClub && (
-                      <div className="p-3.5 rounded-2xl bg-[#F3F0E6] border-2 border-[#E5E0D5] space-y-2.5">
-                        <div className="flex flex-wrap gap-2">
-                          <input
-                            type="text"
-                            value={newClubName}
-                            onChange={(e) => setNewClubName(e.target.value)}
-                            placeholder="Club Name"
-                            className="flex-1 px-3 py-2 rounded-xl bg-white border border-[#E5E0D5] text-xs font-bold"
-                          />
-                          <input
-                            type="text"
-                            maxLength={4}
-                            value={newClubTag}
-                            onChange={(e) => setNewClubTag(e.target.value)}
-                            placeholder="TAG"
-                            className="w-20 px-3 py-2 rounded-xl bg-white border border-[#E5E0D5] font-code text-xs font-bold uppercase"
-                          />
-                        </div>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={newClubDesc}
-                            onChange={(e) => setNewClubDesc(e.target.value)}
-                            placeholder="Club description..."
-                            className="flex-1 px-3 py-2 rounded-xl bg-white border border-[#E5E0D5] text-xs font-bold"
-                          />
-                          <button
-                            onClick={async () => {
-                              const active = await ensurePlayerProfile();
-                              if (!active || !newClubName.trim()) return;
-                              const res = await fetch("/api/state", {
-                                method: "POST",
-                                headers: {
-                                  "Content-Type": "application/json",
-                                },
-                                body: JSON.stringify({
-                                  action: "create_club",
-                                  playerId: active.id,
-                                  name: newClubName.trim(),
-                                  tag: newClubTag || "CLB",
-                                  description:
-                                    newClubDesc.trim() ||
-                                    "Code Clash Club",
-                                  badgeEmoji: "🛡️",
-                                }),
-                              });
-                              const data = await res.json();
-                              if (data.club) {
-                                setClubs((prev) => [data.club, ...prev]);
-                                setCurrentPlayer(data.player);
-                                setShowCreateClub(false);
-                                setNewClubName("");
-                                setNewClubTag("");
-                                setNewClubDesc("");
-                                showToast(
-                                  `🛡️ Created & joined ${data.club.name}!`
-                                );
-                              }
-                            }}
-                            className="px-4 py-2 rounded-xl bg-[#1CB0F6] text-white font-display font-bold text-xs"
-                          >
-                            Save Club
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {clubs.length === 0 ? (
-                      <div className="p-6 rounded-2xl bg-[#F3F0E6] text-center text-xs font-semibold text-[#6C757D]">
-                        No clubs created yet. Tap <strong>+ Create Club</strong> to found the first club!
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {clubs.map((club) => {
-                          const isMember = currentPlayer?.clubId === club.id;
-                          return (
-                            <div
-                              key={club.id}
-                              className={`p-3.5 rounded-2xl border-2 flex flex-col justify-between gap-3 ${
-                                isMember
-                                  ? "bg-lime-50 border-[#58CC02]"
-                                  : "bg-[#F3F0E6] border-[#E5E0D5]"
-                              }`}
-                            >
-                              <div className="flex items-start gap-3">
-                                <div className="w-11 h-11 rounded-2xl bg-white border border-[#E5E0D5] flex items-center justify-center text-2xl">
-                                  {club.badgeEmoji}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <div className="text-sm font-display font-bold text-[#2B2D42] flex items-center gap-1.5">
-                                    <span className="truncate">
-                                      {club.name}
-                                    </span>
-                                    <span className="px-1.5 py-0.5 rounded bg-[#2B2D42] text-white font-code text-[9px]">
-                                      [{club.tag}]
-                                    </span>
-                                  </div>
-                                  <p className="text-[11px] font-semibold text-[#6C757D] line-clamp-2">
-                                    {club.description}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-between pt-1 border-t border-[#E5E0D5]">
-                                <span className="text-xs font-extrabold text-[#2B2D42]">
-                                  🏆 {club.totalTrophies.toLocaleString()} • 👥{" "}
-                                  {club.memberCount}
-                                </span>
-                                <button
-                                  disabled={isMember}
-                                  onClick={async () => {
-                                    const active = await ensurePlayerProfile();
-                                    if (!active) return;
-                                    soundEngine.playReward();
-                                    const res = await fetch("/api/state", {
-                                      method: "POST",
-                                      headers: {
-                                        "Content-Type": "application/json",
-                                      },
-                                      body: JSON.stringify({
-                                        action: "join_club",
-                                        playerId: active.id,
-                                        clubId: club.id,
-                                      }),
-                                    });
-                                    const data = await res.json();
-                                    if (data.player) {
-                                      setCurrentPlayer(data.player);
-                                      fetchGameState(active.id);
-                                      showToast(`🛡️ Joined ${club.name}!`);
-                                    }
-                                  }}
-                                  className={`px-3 py-1.5 rounded-xl font-display font-bold text-xs ${
-                                    isMember
-                                      ? "bg-[#58CC02] text-white"
-                                      : "bg-white border border-[#D6CFC0] text-[#2B2D42] hover:border-[#58CC02]"
-                                  }`}
-                                >
-                                  {isMember ? "✓ Member" : "Join Club"}
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 5: DAILY QUESTS & COSMETIC SHOP */}
-              {activeNav === "shop" && (
-                <div className="space-y-5 animate-pop-in">
-                  {/* Install App — always visible in Quests & Shop */}
-                  <section className="rounded-3xl p-4 border-2 border-[#1CB0F6] border-b-[6px] bg-gradient-to-br from-sky-50 to-cyan-50 space-y-3">
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-[#1CB0F6] text-white flex items-center justify-center text-2xl shrink-0">
-                        📲
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <h2 className="text-base font-display font-bold text-[#2B2D42]">
-                          Install Code Clash
-                        </h2>
-                        <p className="text-xs font-semibold text-[#6C757D] mt-0.5">
-                          Add to your home screen for full-screen play and offline matches (AI, Hotseat, Local).
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {deferredInstall ? (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              deferredInstall.prompt();
-                              const choice = await deferredInstall.userChoice;
-                              setDeferredInstall(null);
-                              if (choice?.outcome === "accepted") {
-                                showToast("📲 Installed! Open it from your home screen.");
-                              }
-                            } catch {
-                              showToast("Use browser menu → Add to Home Screen");
-                            }
-                          }}
-                          className="px-4 py-2.5 rounded-2xl bg-[#1CB0F6] text-white font-display font-bold text-sm border-b-4 border-[#1899D6] btn-tactile"
-                        >
-                          📲 Install App Now
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            showToast(
-                              "On phone: browser menu (⋮) → Add to Home Screen / Install app"
-                            );
-                          }}
-                          className="px-4 py-2.5 rounded-2xl bg-[#1CB0F6] text-white font-display font-bold text-sm border-b-4 border-[#1899D6] btn-tactile"
-                        >
-                          📲 How to Install
-                        </button>
-                      )}
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-2xl text-[11px] font-extrabold border-2 ${
-                          isOnlineNet
-                            ? "bg-emerald-50 border-emerald-300 text-emerald-700"
-                            : "bg-amber-50 border-amber-300 text-amber-800"
-                        }`}
-                      >
-                        <span className={`w-2 h-2 rounded-full ${isOnlineNet ? "bg-emerald-500" : "bg-amber-500"}`} />
-                        {isOnlineNet ? "Online" : "Offline mode"}
-                      </span>
-                    </div>
-                  </section>
-
-                  <section className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-3.5">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h2 className="text-lg font-display font-bold text-[#2B2D42] flex items-center gap-2">
-                          <Flame className="w-5 h-5 text-[#FF9600] fill-[#FF9600]" />
-                          <span>Daily Quests</span>
-                        </h2>
-                        <p className="text-xs font-semibold text-[#6C757D]">
-                          Play matches to fill your quest progress bars and claim rewards!
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2.5">
-                      {DAILY_QUESTS.map((quest) => {
-                        const isClaimed = (
-                          currentPlayer?.claimedQuests || []
-                        ).includes(quest.id);
-                        const prog = getQuestProgress(quest.id);
-
-                        return (
-                          <div
-                            key={quest.id}
-                            className="p-3.5 rounded-2xl bg-[#F3F0E6] border-2 border-[#E5E0D5] flex items-center justify-between gap-3"
-                          >
-                            <div className="flex items-center gap-3 min-w-0 flex-1">
-                              <div className="w-11 h-11 rounded-2xl bg-white border border-[#E5E0D5] flex items-center justify-center text-2xl shrink-0">
-                                {quest.icon}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-sm font-display font-bold text-[#2B2D42] flex items-center gap-2">
-                                  <span>{quest.title}</span>
-                                  <span className="text-[11px] font-code font-bold text-[#6C757D]">
-                                    ({prog.current}/{prog.target})
-                                  </span>
-                                </div>
-                                <div className="text-xs font-semibold text-[#6C757D]">
-                                  {quest.description}
-                                </div>
-                                <div className="mt-1.5 flex items-center gap-2 text-[11px] font-black">
-                                  <span className="text-[#D97706]">
-                                    +{quest.rewardCoins} 🪙
-                                  </span>
-                                  <span className="text-[#58CC02]">
-                                    +{quest.rewardXp} XP
-                                  </span>
-                                  {quest.rewardGems && (
-                                    <span className="text-[#9333EA]">
-                                      +{quest.rewardGems} 💎
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            {isClaimed ? (
-                              <span className="px-3 py-2 rounded-xl bg-lime-100 text-[#46A302] font-display font-bold text-xs flex items-center gap-1">
-                                <Check className="w-4 h-4" /> Claimed
-                              </span>
-                            ) : prog.done ? (
-                              <button
-                                onClick={() => handleClaimQuest(quest.id)}
-                                className="px-4 py-2.5 rounded-xl bg-[#FFC800] text-[#2B2D42] font-display font-bold text-xs border-b-4 border-[#E5B400] btn-tactile shrink-0"
-                              >
-                                Claim Reward
-                              </button>
-                            ) : (
-                              <span className="px-3 py-2 rounded-xl bg-white border border-[#E5E0D5] text-[#6C757D] font-display font-bold text-xs shrink-0">
-                                In Progress
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </section>
-
-                  <section className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-4">
-                    <div>
-                      <h2 className="text-lg font-display font-bold text-[#2B2D42] flex items-center gap-2">
-                        <ShoppingBag className="w-5 h-5 text-[#CE82FF]" />
-                        <span>Cosmetic Shop</span>
-                      </h2>
-                      <p className="text-xs font-semibold text-[#6C757D]">
-                        Use the Coins and Gems you earn from matches to unlock frames, board themes, and titles.
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {getAllShopItems().map((item) => {
-                        const owned =
-                          item.priceCoins === 0 ||
-                          (currentPlayer?.ownedCosmetics || []).includes(
-                            item.id
-                          );
-                        const equipped =
-                          currentPlayer?.frameId === item.id ||
-                          currentPlayer?.themeId === item.id ||
-                          currentPlayer?.effectId === item.id ||
-                          currentPlayer?.title === item.name;
-
-                        return (
-                          <div
-                            key={item.id}
-                            className="p-3.5 rounded-2xl bg-[#F3F0E6] border-2 border-[#E5E0D5] flex flex-col justify-between gap-3"
-                          >
-                            <div className="flex items-start gap-3">
-                              <div
-                                className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 ${item.previewStyle}`}
-                              >
-                                {item.icon}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <span className="text-[10px] font-black uppercase text-[#6C757D]">
-                                  {item.category}
-                                </span>
-                                <div className="text-sm font-display font-bold text-[#2B2D42] truncate">
-                                  {item.name}
-                                </div>
-                                <p className="text-[11px] font-semibold text-[#6C757D]">
-                                  {item.description}
-                                </p>
-                              </div>
-                            </div>
-
-                            {equipped ? (
-                              <div className="w-full py-2 rounded-xl bg-lime-100 text-[#46A302] font-display font-bold text-xs text-center">
-                                ✓ Equipped
-                              </div>
-                            ) : owned ? (
-                              <button
-                                onClick={() => {
-                                  if (item.category === "frame")
-                                    handleUpdateCosmetics({ frameId: item.id });
-                                  if (item.category === "theme")
-                                    handleUpdateCosmetics({ themeId: item.id });
-                                  if (item.category === "effect")
-                                    handleUpdateCosmetics({
-                                      effectId: item.id,
-                                    });
-                                  if (item.category === "title")
-                                    handleUpdateCosmetics({ title: item.name });
-                                }}
-                                className="w-full py-2 rounded-xl bg-[#1CB0F6] text-white font-display font-bold text-xs border-b-3 border-[#1899D6] btn-tactile"
-                              >
-                                Equip Now
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleBuyCosmetic(item.id)}
-                                className="w-full py-2 rounded-xl bg-[#58CC02] text-white font-display font-bold text-xs border-b-3 border-[#46A302] btn-tactile"
-                              >
-                                {item.priceCoins
-                                  ? `Unlock • 🪙 ${item.priceCoins}`
-                                  : `Unlock • 💎 ${item.priceGems}`}
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </section>
-                </div>
-              )}
-            </>
           )}
-        </div>
 
-        {/* RIGHT COMPANION COLUMN (Real Player Card, Open Rooms, Real Leaderboard & Supabase DB Status) */}
-        <aside className="lg:col-span-5 space-y-5">
-          {/* Player Summary or Onboarding Prompt */}
-          {currentPlayer ? (
-            <div className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl ${getFrameClasses(
-                      currentPlayer.frameId
-                    )}`}
-                  >
-                    {currentPlayer.avatarEmoji}
-                  </div>
-                  <div>
-                    <div className="text-xs font-black uppercase text-[#58CC02]">
-                      {currentPlayer.title}
+          <div className="grid lg:grid-cols-[380px_1fr] gap-4 items-start">
+            {/* character stage */}
+            <section className="board-theme rounded-3xl border-2 p-4 relative overflow-hidden" data-board={me.themeId} style={{ borderColor: "var(--board-border)" }}>
+              <div className="flex flex-col items-center text-center relative">
+                <button
+                  onClick={() => { setStageMood(stageMood === "idle" ? "happy" : stageMood === "happy" ? "win" : "idle"); soundEngine.playTap(700); }}
+                  className="active:scale-95 transition-transform" title="Tap me!">
+                  <CharacterAvatar config={me.avatarConfig} frameId={me.frameId} mood={stageMood} size={168} ringWidth={6} />
+                </button>
+                <h2 className="font-display font-bold text-2xl mt-1" style={{ color: "var(--board-ink)" }}>{me.username}</h2>
+                <p className="text-[11px] font-black uppercase tracking-widest" style={{ color: "var(--board-soft)" }}>{me.title}</p>
+                <div className="flex items-center gap-2 mt-2">
+                  <DivisionBadge trophies={me.trophies} />
+                  <span className="text-xs font-black" style={{ color: "var(--board-soft)" }}>{me.trophies} trophies{myRank >= 0 ? ` · Rank #${myRank + 1}` : ""}</span>
+                </div>
+                {next && (
+                  <div className="w-full max-w-[240px] mt-2">
+                    <div className="h-3 rounded-full overflow-hidden" style={{ background: "rgba(0,0,0,0.14)", border: "2px solid var(--board-border)" }}>
+                      <div className="h-full rounded-full transition-all" style={{ width: `${divProgress}%`, background: div.gradient }} />
                     </div>
-                    <h3 className="text-lg font-display font-bold text-[#2B2D42]">
-                      {currentPlayer.username}
-                    </h3>
-                    <div className="text-xs font-bold text-[#6C757D]">
-                      {divInfo.badgeEmoji} {divInfo.name} • {currentPlayer.wins}
-                      W / {currentPlayer.losses}L
-                    </div>
+                    <p className="text-[10px] font-black mt-0.5" style={{ color: "var(--board-soft)" }}>{next.minTrophies - me.trophies} trophies to {next.name}</p>
                   </div>
+                )}
+                <div className="flex gap-4 mt-3 text-center" style={{ color: "var(--board-ink)" }}>
+                  <div><p className="font-display font-bold text-lg leading-none">{me.wins}</p><p className="text-[10px] font-black" style={{ color: "var(--board-soft)" }}>WINS</p></div>
+                  <div><p className="font-display font-bold text-lg leading-none">{me.totalGames ? Math.round((me.wins / me.totalGames) * 100) : 0}%</p><p className="text-[10px] font-black" style={{ color: "var(--board-soft)" }}>WIN RATE</p></div>
+                  <div><p className="font-display font-bold text-lg leading-none">{me.fastestWinTurns ?? "—"}</p><p className="text-[10px] font-black" style={{ color: "var(--board-soft)" }}>FASTEST</p></div>
+                </div>
+                <button onClick={() => setScreen("shop")} className="btn-game btn-purple px-5 py-2.5 mt-3 flex items-center gap-2 text-sm">
+                  <ShoppingBag size={16} strokeWidth={2.6} /> Customize my character
+                </button>
+              </div>
+            </section>
+
+            {/* right column */}
+            <div className="space-y-4">
+              {/* PLAY */}
+              <button onClick={() => { setShowPlaySheet(true); soundEngine.playTap(600); }}
+                className="btn-game btn-green w-full py-5 sm:py-6 text-2xl sm:text-3xl flex items-center justify-center gap-3 !rounded-3xl">
+                <Play size={30} strokeWidth={2.8} fill="#fff" /> PLAY
+              </button>
+
+              {/* daily challenge */}
+              <div className="card-game p-3.5 flex items-center gap-3">
+                <span className="w-12 h-12 rounded-2xl flex items-center justify-center text-white shrink-0" style={{ background: dailyDone ? "#58CC02" : "var(--orange)" }}>
+                  {dailyDone ? <Check size={24} strokeWidth={3} /> : <CalendarCheck size={24} strokeWidth={2.5} />}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-display font-semibold leading-tight">Today: {dc.title} <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md text-white align-middle" style={{ background: "var(--purple)" }}>{dc.bonusMultiplier}× bonus</span></p>
+                  <p className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>{dc.description}</p>
                 </div>
                 <button
+                  disabled={dailyDone}
                   onClick={() => {
-                    soundEngine.playTap(500);
-                    setInspectedPlayer(currentPlayer);
+                    const diff: AIDifficulty =
+                      dc.rule === "hard_ai_only" ? (me.trophies >= 450 ? "Oracle" : "Mastermind")
+                      : dc.rule === "no_orders_hint" ? "Mastermind"
+                      : dc.title === "Blitz Duel" ? "Mastermind" : "Tactician";
+                    const timer = dc.rule === "speed_30" ? 30 : dc.rule === "classic" ? 45 : 60;
+                    startAI(diff, timer, { rule: dc.rule, id: dc.id });
                   }}
-                  className="px-3 py-2 rounded-xl bg-[#F3F0E6] hover:bg-[#E5E0D5] text-xs font-extrabold text-[#2B2D42]"
-                >
-                  Profile
+                  className={`btn-game px-4 py-2.5 shrink-0 ${dailyDone ? "btn-ghost" : "btn-gold"}`}>
+                  {dailyDone ? "Done!" : "Play"}
                 </button>
               </div>
 
-              {/* Open 1v1 Rooms Feed */}
-              <div className="pt-2 border-t border-[#E5E0D5] space-y-2">
-                <div className="text-xs font-extrabold uppercase tracking-wider text-[#6C757D] flex items-center justify-between">
-                  <span>⚡ Open 1v1 Rooms</span>
-                  <span className="text-[#58CC02]">Live</span>
+              {/* bots preview strip */}
+              <div className="card-game p-3.5">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-display font-semibold flex items-center gap-1.5"><Bot size={17} style={{ color: "var(--purple)" }} /> Meet your rivals</h3>
+                  <button onClick={() => setShowPlaySheet(true)} className="text-xs font-black flex items-center gap-0.5" style={{ color: "var(--blue)" }}>Battle <ChevronRight size={13} strokeWidth={3} /></button>
                 </div>
-                {openMatches.filter((m) => m.status === "waiting").length ===
-                0 ? (
-                  <div className="p-3 rounded-2xl bg-[#F3F0E6] text-xs font-semibold text-[#6C757D] text-center">
-                    No open 1v1 rooms waiting right now.
-                  </div>
-                ) : (
-                  openMatches
-                    .filter((m) => m.status === "waiting")
-                    .slice(0, 3)
-                    .map((m) => (
-                      <div
-                        key={m.id}
-                        className="p-2.5 rounded-2xl bg-[#F3F0E6] border border-[#E5E0D5] flex items-center justify-between text-xs"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg">{m.player1Avatar}</span>
-                          <div>
-                            <div className="font-extrabold text-[#2B2D42]">
-                              {m.player1Name}{" "}
-                              <span className="font-code text-[10px] text-[#1899D6]">
-                                [{m.roomCode}]
-                              </span>
-                            </div>
-                            <div className="text-[10px] font-bold text-[#6C757D]">
-                              {m.player1Division} •{" "}
-                              {m.timerSeconds === 0
-                                ? "Unlimited"
-                                : `${m.timerSeconds}s Timer`}
-                            </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(Object.keys(AI_BOTS) as AIDifficulty[]).map((d, i) => {
+                    const b = AI_BOTS[d];
+                    return (
+                      <button key={d} onClick={() => startAI(d, lastTimer || 45)} className="flex flex-col items-center p-1.5 rounded-2xl active:scale-95 transition-transform"
+                        style={{ background: "var(--surface-3)", border: "2px solid var(--border)" }}>
+                        <CharacterAvatar config={b.avatar} frameId={b.frameId} size={52} ringWidth={3} mood="idle" />
+                        <span className="font-display font-semibold text-[13px] leading-tight mt-1">{b.name}</span>
+                        <span className="flex gap-0.5 mt-0.5">
+                          {[0, 1, 2, 3].map((s) => <Star key={s} size={9} fill={s <= i ? "#FFC800" : "none"} style={{ color: s <= i ? "#FFC800" : "var(--border-strong)" }} />)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* daily quests */}
+              <div className="card-game p-3.5">
+                <h3 className="font-display font-semibold flex items-center gap-1.5 mb-2.5">
+                  <Target size={17} style={{ color: "var(--blue)" }} /> Daily quests
+                  <span className="ml-auto chip px-2 py-1 text-[11px] font-black flex items-center gap-1"><Flame size={12} style={{ color: "#FF7A18" }} fill="#FF7A18" /> {me.streakDays} day streak</span>
+                </h3>
+                <div className="space-y-2.5">
+                  {DAILY_QUESTS.map((q) => {
+                    const prog = Math.min(stats[q.statKey] || 0, q.target);
+                    const done = prog >= q.target;
+                    const claimed = me.claimedDailyQuests?.includes(`${q.id}:${today}`);
+                    return (
+                      <div key={q.id} className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between gap-2">
+                            <p className="font-black text-[13px] truncate">{q.title}</p>
+                            <p className="text-[11px] font-black shrink-0" style={{ color: "var(--ink-faint)" }}>{prog}/{q.target}</p>
+                          </div>
+                          <div className="h-2.5 rounded-full overflow-hidden mt-1" style={{ background: "var(--surface-3)", border: "1.5px solid var(--border)" }}>
+                            <div className="h-full rounded-full transition-all" style={{ width: `${(prog / q.target) * 100}%`, background: done ? "#58CC02" : "var(--blue)" }} />
                           </div>
                         </div>
-                        <button
-                          onClick={() =>
-                            handleJoinRoomByCode(m.roomCode, "online_1v1")
-                          }
-                          className="px-3 py-1.5 rounded-xl bg-[#1CB0F6] text-white font-display font-bold text-[11px] border-b-2 border-[#1899D6] btn-tactile"
-                        >
-                          Join
+                        <button disabled={!done || claimed} onClick={() => claimQuest(q.id)}
+                          className={`btn-game px-3 py-2 text-xs shrink-0 ${claimed ? "btn-ghost" : done ? "btn-gold" : "btn-ghost"}`}>
+                          {claimed ? "Claimed" : `+${q.rewardCoins}c`}
                         </button>
                       </div>
-                    ))
-                )}
-              </div>
-            </div>
-          ) : null}
-
-          {/* Global Leaderboard (100% Real Players) */}
-          <div className="bg-white rounded-3xl p-5 border-2 border-[#E5E0D5] border-b-[6px] space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-display font-bold text-[#2B2D42] flex items-center gap-2">
-                <Trophy className="w-5 h-5 text-[#FFC800]" />
-                <span>Global Leaderboard</span>
-              </h3>
-              <span className="text-[11px] font-extrabold text-[#6C757D]">
-                {leaderboard.length}{" "}
-                {leaderboard.length === 1 ? "Player" : "Players"}
-              </span>
-            </div>
-
-            {leaderboard.length === 0 ? (
-              <div className="p-6 rounded-2xl bg-[#F3F0E6] text-center space-y-1">
-                <div className="text-2xl">🥇</div>
-                <div className="text-xs font-extrabold text-[#2B2D42]">
-                  Leaderboard is Ready for the First Champion!
-                </div>
-                <div className="text-[11px] font-semibold text-[#6C757D]">
-                  Create your profile and win a match to claim the #1 spot.
+                    );
+                  })}
                 </div>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {leaderboard.slice(0, 8).map((player, index) => {
-                  const pDiv = getDivisionForTrophies(player.trophies);
+
+              {/* menu grid */}
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {[
+                  { label: "Shop", icon: ShoppingBag, color: "#A560E8", go: () => setScreen("shop") },
+                  { label: "Rankings", icon: Trophy, color: "#E0A800", go: () => setScreen("rank") },
+                  { label: "How to Play", icon: GraduationCap, color: "#1CB0F6", go: () => setShowTutorial(true) },
+                  { label: "Reviews", icon: Star, color: "#FFC800", go: () => { setCommunityTab("reviews"); setScreen("community"); } },
+                  { label: "Feedback", icon: MessageSquare, color: "#FF4B6E", go: () => { setCommunityTab("feedback"); setScreen("community"); } },
+                  { label: "Lobby Chat", icon: Users, color: "#58CC02", go: () => { setCommunityTab("lobby"); setScreen("community"); } },
+                  { label: "My Profile", icon: User, color: "#FF7A18", go: () => setShowProfile(true) },
+                  ...(installEvt && !isStandalone ? [{ label: "Install App", icon: Download, color: "#14D4C5", go: installApp }] : []),
+                  ...(me.isAdmin ? [{ label: "Admin", icon: Crown, color: "#E85D04", go: () => { setCommunityTab("admin"); setScreen("community"); } }] : []),
+                ].map((m) => {
+                  const Icon = m.icon;
                   return (
-                    <div
-                      key={player.id}
-                      onClick={() => {
-                        soundEngine.playTap(480);
-                        setInspectedPlayer(player);
-                      }}
-                      className={`p-2.5 rounded-2xl border-2 flex items-center justify-between cursor-pointer transition ${
-                        player.id === currentPlayer?.id
-                          ? "bg-lime-50 border-[#58CC02]"
-                          : "bg-[#F3F0E6] border-[#E5E0D5] hover:border-[#1CB0F6]"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span
-                          className={`w-6 h-6 rounded-lg font-code text-xs font-black flex items-center justify-center ${
-                            index === 0
-                              ? "bg-[#FFC800] text-[#2B2D42]"
-                              : index === 1
-                              ? "bg-slate-300 text-[#2B2D42]"
-                              : index === 2
-                              ? "bg-amber-600 text-white"
-                              : "bg-white text-[#6C757D]"
-                          }`}
-                        >
-                          {index + 1}
-                        </span>
-                        <div className="relative">
-                          <span className="text-xl">{player.avatarEmoji}</span>
-                          <span
-                            className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
-                              player.isOnline ? "bg-emerald-500" : "bg-slate-400"
-                            }`}
-                            title={player.isOnline ? "Online" : "Offline"}
-                          />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-extrabold text-[#2B2D42] truncate flex items-center gap-1">
-                            {player.username}
-                            {player.isOnline && (
-                              <span className="text-[9px] font-black text-emerald-600">LIVE</span>
-                            )}
-                          </div>
-                          <div className="text-[10px] font-bold text-[#6C757D]">
-                            {pDiv.badgeEmoji} {player.division} • {player.wins}W/{player.losses}L • #{index + 1}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="font-code text-xs font-black text-[#2B2D42] bg-white px-2.5 py-1 rounded-xl border border-[#E5E0D5]">
-                        🏆 {player.trophies}
-                      </div>
-                    </div>
+                    <button key={m.label} onClick={() => { soundEngine.playTap(520); m.go(); }}
+                      className="card-game p-3 flex flex-col items-center gap-1.5 active:scale-95 transition-transform hover:-translate-y-0.5">
+                      <span className="w-11 h-11 rounded-2xl flex items-center justify-center text-white" style={{ background: m.color }}>
+                        <Icon size={21} strokeWidth={2.5} />
+                      </span>
+                      <span className="font-display font-semibold text-[13px] leading-none">{m.label}</span>
+                    </button>
                   );
                 })}
               </div>
-            )}
-          </div>
 
-          {/* Supabase / PostgreSQL Auto-Migration Status Badge */}
-          <div className="bg-[#F3F0E6] rounded-2xl p-3.5 border border-[#E5E0D5] flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <Database className="w-4 h-4 text-[#58CC02]" />
-              <span className="font-bold text-[#2B2D42]">
-                {supabaseReady
-                  ? "Supabase Database Connected & Migrated"
-                  : "PostgreSQL Active (Auto-Migrates on Supabase Env Connect)"}
-              </span>
+              {session?.isGuest && (
+                <div className="rounded-2xl p-3 flex items-center gap-3" style={{ background: "linear-gradient(135deg,#1CB0F6,#7B5CFF)", color: "#fff" }}>
+                  <Sparkles size={26} className="shrink-0" />
+                  <p className="font-bold text-sm flex-1">You&rsquo;re playing as a guest. Create a free account to save progress on any device and appear on the leaderboard!</p>
+                  <button onClick={logout} className="btn-game px-3.5 py-2 text-sm shrink-0" style={{ background: "#fff", color: "#2456E6", boxShadow: "0 4px 0 rgba(0,0,0,.25)" }}>Sign up</button>
+                </div>
+              )}
+
+              {/* mini leaderboard */}
+              {leaderboard.length > 0 && (
+                <div className="card-game p-3.5">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-display font-semibold flex items-center gap-1.5"><Trophy size={17} style={{ color: "#E0A800" }} /> Top code breakers</h3>
+                    <button onClick={() => setScreen("rank")} className="text-xs font-black flex items-center gap-0.5" style={{ color: "var(--blue)" }}>See all <ChevronRight size={13} strokeWidth={3} /></button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {leaderboard.slice(0, 5).map((r, i) => (
+                      <div key={r.id} className="flex items-center gap-2 px-2 py-1.5 rounded-xl" style={{ background: r.id === me.id ? "rgba(88,204,2,0.14)" : "var(--surface-3)" }}>
+                        <span className="font-display font-bold w-6 text-center" style={{ color: i === 0 ? "#E0A800" : "var(--ink-soft)" }}>{i + 1}</span>
+                        <CharacterAvatar config={r.avatarConfig} frameId={r.frameId} size={32} ringWidth={2} />
+                        <span className="font-black text-sm flex-1 truncate">{r.username}</span>
+                        <DivisionBadge trophies={r.trophies} size="sm" />
+                        <span className="font-black text-sm flex items-center gap-1"><Trophy size={13} style={{ color: "#E0A800" }} />{r.trophies}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-            <span className="w-2.5 h-2.5 rounded-full bg-[#58CC02]" />
           </div>
-        </aside>
-      </main>
 
-      {/* BOTTOM 5-TAB NAVIGATION DOCK */}
-      <nav className="fixed bottom-0 inset-x-0 z-40 bg-[#FFFDF7]/95 backdrop-blur-md border-t-2 border-[#E5E0D5]">
-        <div className="max-w-xl mx-auto px-3 h-20 flex items-center justify-around gap-1">
-          {[
-            { id: "play", label: "Play", icon: Swords, color: "#58CC02" },
-            { id: "rank", label: "Rank & Pass", icon: Crown, color: "#FFC800" },
-            {
-              id: "tournaments",
-              label: "Tourneys",
-              icon: Trophy,
-              color: "#FF9600",
-            },
-            { id: "social", label: "Social", icon: Users, color: "#1CB0F6" },
-            {
-              id: "shop",
-              label: "Quests & Shop",
-              icon: Sparkles,
-              color: "#CE82FF",
-            },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isSelected = activeNav === tab.id && !inArena;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  soundEngine.playTap(500);
-                  setInArena(false);
-                  setActiveNav(
-                    tab.id as
-                      | "play"
-                      | "rank"
-                      | "tournaments"
-                      | "social"
-                      | "shop"
-                  );
-                }}
-                className={`flex-1 py-2 px-1 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${
-                  isSelected
-                    ? "bg-[#F3F0E6] border-2 border-[#E5E0D5] -translate-y-1 shadow-xs"
-                    : "text-[#6C757D] hover:text-[#2B2D42]"
-                }`}
-              >
-                <Icon
-                  className="w-5 h-5"
-                  style={{ color: isSelected ? tab.color : undefined }}
-                />
-                <span
-                  className={`text-[11px] font-display font-bold ${
-                    isSelected ? "text-[#2B2D42]" : "text-[#6C757D]"
-                  }`}
-                >
-                  {tab.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+          <p className="text-center text-[11px] font-bold mt-8" style={{ color: "var(--ink-faint)" }}>
+            Cipher Clash v3 — hide your code, crack theirs, become a Legend.
+          </p>
+        </main>
+      )}
 
-      {/* DYNAMIC PLAYER PROFILE & ACCOUNT MODAL */}
-      {inspectedPlayer && (
-        <DynamicProfileModal
-          player={inspectedPlayer}
-          isSelf={inspectedPlayer.id === currentPlayer?.id}
-          isFollowing={followingIds.includes(inspectedPlayer.id)}
-          onClose={() => setInspectedPlayer(null)}
-          onToggleFollow={handleToggleFollow}
-          onSendChallenge={(target) =>
-            handleCreateOrChallengeOnline(target, "online_1v1")
-          }
-          onUpdateCosmetics={handleUpdateCosmetics}
-          onAuthAction={handleAuthAction}
+      {screen === "shop" && (
+        <Shop me={me} onBack={() => setScreen("home")} onBuy={handleBuy} onEquip={handleEquip} busyId={busyItem} />
+      )}
+
+      {screen === "rank" && (
+        <RankScreen leaderboard={leaderboard} me={me} onBack={() => setScreen("home")} onRefresh={refreshState} />
+      )}
+
+      {screen === "community" && (
+        <Community me={me} token={token} onBack={() => setScreen("home")} showToast={showToast} initialTab={communityTab} />
+      )}
+
+      {showPlaySheet && (
+        <PlaySheet
+          me={me}
+          onClose={() => setShowPlaySheet(false)}
+          onStartAI={startAI}
+          onStartHotseat={startHotseat}
+          onStartOnline={startOnlineAction}
+          showToast={showToast}
         />
       )}
 
-      {/* Global Chat */}
-      <ChatPanel playerId={currentPlayer?.id ?? null} playerName={currentPlayer?.username} />
+      {showProfile && (
+        <ProfileModal me={me} rank={myRank >= 0 ? myRank + 1 : null} onClose={() => setShowProfile(false)}
+          onCustomize={() => { setShowProfile(false); setScreen("shop"); }} onLogout={logout} isGuest={!!session?.isGuest} />
+      )}
 
-      {/* Credits footer */}
-      <footer className="safe-bottom mt-auto border-t-2 border-[#E5E0D5] bg-[#F3F0E6]/80 px-4 py-3 text-center">
-        <p className="text-[11px] font-bold text-[#6C757D] leading-relaxed">
-          Built by <span className="text-[#2B2D42] font-black">Imad Mohammed</span>
-          {" "}· Supported &amp; inspired by{" "}
-          <span className="text-[#2B2D42] font-black">Esmael</span>,{" "}
-          <span className="text-[#2B2D42] font-black">Aymen</span> and more
-        </p>
-        <p className="text-[10px] font-semibold text-[#9CA3AF] mt-0.5">
-          Code Clash · Ranks = trophies · Create an account so wins count on the global leaderboard
-        </p>
-      </footer>
+      {showSettings && (
+        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="absolute inset-0 bg-black/45 animate-fade" onClick={() => setShowSettings(false)} />
+          <div className="relative card-game w-full sm:max-w-sm p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-display font-bold text-xl flex items-center gap-2"><Settings size={20} /> Settings</h3>
+              <button onClick={() => setShowSettings(false)} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center"><X size={17} strokeWidth={2.8} /></button>
+            </div>
+            <div className="space-y-2">
+              <button onClick={() => { const m = soundEngine.toggleMute(); setMuted(m); }} className="btn-game btn-ghost w-full py-3 px-4 flex items-center gap-3">
+                {muted ? <VolumeX size={19} /> : <Volume2 size={19} />} <span className="flex-1 text-left">Sound effects</span>
+                <span className="font-black text-xs" style={{ color: muted ? "var(--red)" : "#58CC02" }}>{muted ? "OFF" : "ON"}</span>
+              </button>
+              <button onClick={() => setTheme(!isDark)} className="btn-game btn-ghost w-full py-3 px-4 flex items-center gap-3">
+                {isDark ? <Sun size={19} /> : <Moon size={19} />} <span className="flex-1 text-left">Dark mode</span>
+                <span className="font-black text-xs" style={{ color: isDark ? "#58CC02" : "var(--ink-faint)" }}>{isDark ? "ON" : "OFF"}</span>
+              </button>
+              {!isStandalone && (
+                <button onClick={() => { setShowSettings(false); installApp(); }} className="btn-game btn-green w-full py-3 px-4 flex items-center gap-3">
+                  <Download size={19} /> Install Cipher Clash app
+                </button>
+              )}
+              <button onClick={() => { setShowSettings(false); setShowTutorial(true); }} className="btn-game btn-ghost w-full py-3 px-4 flex items-center gap-3">
+                <GraduationCap size={19} /> Replay how-to-play guide
+              </button>
+              <button onClick={() => { setShowSettings(false); setCommunityTab("feedback"); setScreen("community"); }} className="btn-game btn-ghost w-full py-3 px-4 flex items-center gap-3">
+                <MessageSquare size={19} /> Send feedback
+              </button>
+              <button onClick={logout} className="btn-game btn-red w-full py-3 px-4 flex items-center gap-3">
+                <LogOut size={19} /> {session?.isGuest ? "Exit guest mode" : "Log out"}
+              </button>
+            </div>
+            <p className="text-center text-[11px] font-bold mt-4" style={{ color: "var(--ink-faint)" }}>Cipher Clash v3.0</p>
+          </div>
+        </div>
+      )}
+
+      {showIosInstall && (
+        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="absolute inset-0 bg-black/45 animate-fade" onClick={() => setShowIosInstall(false)} />
+          <div className="relative card-game w-full sm:max-w-sm p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center">
+            <Character config={{ base: "owl", color: "classic", accessory: "crown" }} mood="happy" size={90} />
+            <h3 className="font-display font-bold text-xl mt-1">Install on iPhone/iPad</h3>
+            <p className="text-sm font-bold mt-1" style={{ color: "var(--ink-soft)" }}>
+              Apple only allows installing from Safari: tap the <b>Share</b> button, then <b>“Add to Home Screen”</b>. That&rsquo;s it — Cipher Clash becomes a real app icon!
+            </p>
+            <button onClick={() => setShowIosInstall(false)} className="btn-game btn-green w-full py-3 mt-4">Got it!</button>
+          </div>
+        </div>
+      )}
+
+      {showTutorial && (
+        <Tutorial me={me} onFinish={(go) => finishTutorial(go)} onSkip={() => finishTutorial("skip")} />
+      )}
+
+      <Toasts toasts={toasts} />
+    </div>
+  );
+}
+
+/* ------------------------------- Toasts ------------------------------- */
+
+function Toasts({ toasts }: { toasts: Toast[] }) {
+  return (
+    <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] inset-x-0 z-[90] flex flex-col items-center gap-2 px-4 pointer-events-none">
+      {toasts.map((t) => (
+        <div key={t.id} className="animate-pop pointer-events-auto max-w-md text-center font-black text-sm px-4 py-2.5 rounded-2xl shadow-xl border-2"
+          style={{
+            background: t.kind === "err" ? "#FF4B4B" : "#26283B",
+            color: "#fff", borderColor: "rgba(255,255,255,0.25)",
+          }}>
+          {t.msg}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------- Welcome ------------------------------- */
+
+function Welcome({ doAuth, showToast, toasts }: {
+  doAuth: (mode: "login" | "register" | "guest", u: string, p: string) => Promise<void>;
+  showToast: (m: string, k?: "ok" | "err") => void;
+  toasts: Toast[];
+}) {
+  const [mode, setMode] = useState<"login" | "register">("register");
+  const [username, setUsername] = useState(() => lastUsername());
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  const run = async (m: "login" | "register" | "guest") => {
+    setBusy(m); setError("");
+    try {
+      await doAuth(m, username.trim(), password);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong. Check your connection!");
+    }
+    setBusy("");
+  };
+
+  return (
+    <div className="min-h-[100dvh] flex flex-col items-center justify-center px-4 py-8">
+      <div className="w-full max-w-md text-center animate-rise">
+        <div className="flex justify-center">
+          <Character config={{ base: "owl", color: "classic", accessory: "crown" }} mood="win" size={150} />
+        </div>
+        <h1 className="font-display font-bold text-5xl tracking-wide leading-none">
+          CIPHER <span style={{ color: "var(--brand)" }}>CLASH</span>
+        </h1>
+        <p className="font-black mt-2" style={{ color: "var(--ink-soft)" }}>Hide your code. Crack theirs first!</p>
+
+        <div className="flex justify-center gap-2 mt-4">
+          {(Object.keys(AI_BOTS) as AIDifficulty[]).map((d) => (
+            <div key={d} className="flex flex-col items-center">
+              <CharacterAvatar config={AI_BOTS[d].avatar} frameId={AI_BOTS[d].frameId} size={52} ringWidth={3} />
+              <span className="text-[10px] font-black mt-0.5" style={{ color: "var(--ink-soft)" }}>{AI_BOTS[d].name}</span>
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] font-black mt-1" style={{ color: "var(--ink-faint)" }}>4 ANIMATED RIVALS ARE WAITING FOR YOU</p>
+
+        <button onClick={() => run("guest")} disabled={!!busy} className="btn-game btn-green w-full py-4 text-xl mt-5 flex items-center justify-center gap-2">
+          {busy === "guest" ? <Loader2 className="animate-spin" size={22} /> : <Play size={22} fill="#fff" />} PLAY NOW — no sign up!
+        </button>
+
+        <div className="card-game p-4 mt-3 text-left">
+          <div className="grid grid-cols-2 gap-1.5 mb-3">
+            <button onClick={() => { setMode("register"); setError(""); }} className={`btn-game py-2.5 ${mode === "register" ? "btn-blue" : "btn-ghost"}`}>Create account</button>
+            <button onClick={() => { setMode("login"); setError(""); }} className={`btn-game py-2.5 ${mode === "login" ? "btn-blue" : "btn-ghost"}`}>I have an account</button>
+          </div>
+          <form onSubmit={(e) => { e.preventDefault(); run(mode); }} className="space-y-2">
+            <input value={username} onChange={(e) => setUsername(e.target.value)} maxLength={16} placeholder="Pick a username"
+              className="input-game w-full px-3.5 py-3 font-black" autoComplete="username" />
+            <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="Password (4+ characters)"
+              className="input-game w-full px-3.5 py-3 font-black" autoComplete={mode === "login" ? "current-password" : "new-password"} />
+            {error && <p className="text-sm font-black rounded-xl px-3 py-2 animate-pop" style={{ background: "rgba(255,75,75,0.14)", color: "#D33131" }}>{error}</p>}
+            <button type="submit" disabled={!!busy || username.trim().length < 3} className="btn-game btn-blue w-full py-3.5 text-lg flex items-center justify-center gap-2">
+              {busy ? <Loader2 className="animate-spin" size={20} /> : mode === "register" ? "Create my account" : "Log in & play"}
+            </button>
+          </form>
+          <p className="text-[11px] font-bold text-center mt-2" style={{ color: "var(--ink-faint)" }}>
+            An account saves your trophies, streak &amp; character on every device.
+          </p>
+        </div>
+      </div>
+      <Toasts toasts={toasts} />
+    </div>
+  );
+}
+
+function TimerChips({ options, value, set }: { options: number[]; value: number; set: (n: number) => void }) {
+  return (
+  <div className="flex items-center gap-1.5 flex-wrap">
+    <span className="text-[11px] font-black flex items-center gap-1" style={{ color: "var(--ink-faint)" }}><Timer size={12} /> PER TURN:</span>
+    {options.map((o) => (
+      <button key={o} onClick={() => { set(o); soundEngine.playTap(500); }}
+        className={`btn-game px-3 py-1.5 text-xs ${value === o ? "btn-blue" : "btn-ghost"}`}>
+        {o === 0 ? "No limit" : `${o}s`}
+      </button>
+    ))}
+  </div>
+  );
+}
+
+/* ------------------------------- PlaySheet ------------------------------- */
+
+function PlaySheet({ me, onClose, onStartAI, onStartHotseat, onStartOnline, showToast }: {
+  me: Player;
+  onClose: () => void;
+  onStartAI: (d: AIDifficulty, timer: number) => void;
+  onStartHotseat: (timer: number) => void;
+  onStartOnline: (action: "quick_match" | "create_room" | "join_room", timer: number, code?: string) => Promise<void>;
+  showToast: (m: string, k?: "ok" | "err") => void;
+}) {
+  const [step, setStep] = useState<"modes" | "bots" | "online" | "hotseat">("modes");
+  const [bot, setBot] = useState<AIDifficulty>("Rookie");
+  const [timer, setTimer] = useState(45);
+  const [joinCode, setJoinCode] = useState("");
+  const [busy, setBusy] = useState("");
+  const [onlineError, setOnlineError] = useState("");
+
+
+  const online = async (action: "quick_match" | "create_room" | "join_room") => {
+    setBusy(action); setOnlineError("");
+    try {
+      await onStartOnline(action, timer, joinCode.trim());
+    } catch (e) {
+      setOnlineError(e instanceof Error ? e.message : "Connection failed — try again!");
+    }
+    setBusy("");
+  };
+
+  return (
+    <div className="fixed inset-0 z-[65] flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/45 backdrop-blur-[2px] animate-fade" onClick={onClose} />
+      <div className="relative card-game w-full sm:max-w-lg max-h-[92dvh] overflow-y-auto pretty-scroll rounded-b-none sm:rounded-b-[1.4rem] p-4 sm:p-5 animate-slide-up">
+        <div className="flex items-center gap-2 mb-3">
+          {step !== "modes" && (
+            <button onClick={() => setStep("modes")} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center"><ArrowLeft size={17} strokeWidth={2.8} /></button>
+          )}
+          <h3 className="font-display font-bold text-2xl flex-1">
+            {step === "modes" && "Choose your battle"}
+            {step === "bots" && "Pick your rival bot"}
+            {step === "online" && "Online battle"}
+            {step === "hotseat" && "2 players, 1 device"}
+          </h3>
+          <button onClick={onClose} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center"><X size={17} strokeWidth={2.8} /></button>
+        </div>
+
+        {step === "modes" && (
+          <div className="space-y-2.5">
+            <button onClick={() => setStep("bots")} className="w-full card-game p-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5">
+              <span className="flex -space-x-3">
+                <CharacterAvatar config={AI_BOTS.Rookie.avatar} frameId={AI_BOTS.Rookie.frameId} size={46} ringWidth={3} />
+                <CharacterAvatar config={AI_BOTS.Oracle.avatar} frameId={AI_BOTS.Oracle.frameId} size={46} ringWidth={3} />
+              </span>
+              <span className="flex-1">
+                <span className="font-display font-semibold text-lg block leading-tight">Vs Bots</span>
+                <span className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>4 animated rivals, easy to nearly-impossible. Instant action!</span>
+              </span>
+              <ChevronRight size={20} style={{ color: "var(--ink-faint)" }} />
+            </button>
+
+            <button onClick={() => setStep("online")} className="w-full card-game p-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5">
+              <span className="w-[52px] h-[52px] rounded-full flex items-center justify-center text-white shrink-0" style={{ background: "linear-gradient(135deg,#1CB0F6,#7B5CFF)" }}>
+                <Globe size={26} strokeWidth={2.4} />
+              </span>
+              <span className="flex-1">
+                <span className="font-display font-semibold text-lg block leading-tight">Online Battle</span>
+                <span className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Real players! Quick match, or a private room with a friend. Chat &amp; reactions included.</span>
+              </span>
+              <ChevronRight size={20} style={{ color: "var(--ink-faint)" }} />
+            </button>
+
+            <button onClick={() => setStep("hotseat")} className="w-full card-game p-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5">
+              <span className="w-[52px] h-[52px] rounded-full flex items-center justify-center text-white shrink-0" style={{ background: "linear-gradient(135deg,#FF7A18,#FF4B6E)" }}>
+                <Users size={26} strokeWidth={2.4} />
+              </span>
+              <span className="flex-1">
+                <span className="font-display font-semibold text-lg block leading-tight">2 Players</span>
+                <span className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Pass-and-play on this device. Perfect for friends nearby!</span>
+              </span>
+              <ChevronRight size={20} style={{ color: "var(--ink-faint)" }} />
+            </button>
+          </div>
+        )}
+
+        {step === "bots" && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              {(Object.keys(AI_BOTS) as AIDifficulty[]).map((d, i) => {
+                const b = AI_BOTS[d];
+                const sel = bot === d;
+                return (
+                  <button key={d} onClick={() => { setBot(d); soundEngine.playTap(560 + i * 40); }}
+                    className="card-game p-3 flex flex-col items-center text-center active:scale-[0.97] transition-transform"
+                    style={sel ? { borderColor: b.accent, boxShadow: `0 0 0 2px ${b.accent}, var(--shadow-card)` } : undefined}>
+                    <CharacterAvatar config={b.avatar} frameId={b.frameId} size={76} ringWidth={4} mood={sel ? "happy" : "idle"} />
+                    <span className="font-display font-semibold leading-tight mt-1">{b.name}</span>
+                    <span className="text-[10px] font-black uppercase tracking-wide" style={{ color: b.accent }}>{b.title}</span>
+                    <span className="flex gap-0.5 my-1">
+                      {[0, 1, 2, 3].map((s) => <Star key={s} size={10} fill={s <= i ? "#FFC800" : "none"} style={{ color: s <= i ? "#FFC800" : "var(--border-strong)" }} />)}
+                    </span>
+                    <span className="text-[11px] font-bold leading-tight" style={{ color: "var(--ink-soft)" }}>{b.tagline}</span>
+                    <span className="text-[11px] font-black mt-1 flex items-center gap-1" style={{ color: "#58CC02" }}>
+                      Win: +{b.rewardCoins}<Coins size={11} /> +{b.trophyDelta}<Trophy size={11} />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <TimerChips options={[15, 30, 45, 60, 0]} value={timer} set={setTimer} />
+            <button onClick={() => onStartAI(bot, timer)} className="btn-game btn-green w-full py-4 text-xl flex items-center justify-center gap-2">
+              <Swords size={22} strokeWidth={2.7} /> Battle {AI_BOTS[bot].name}!
+            </button>
+          </div>
+        )}
+
+        {step === "online" && (
+          <div className="space-y-3">
+            <TimerChips options={[30, 45, 60, 90]} value={timer} set={setTimer} />
+            <button onClick={() => online("quick_match")} disabled={!!busy} className="btn-game btn-green w-full py-4 text-lg flex items-center justify-center gap-2">
+              {busy === "quick_match" ? <Loader2 className="animate-spin" size={21} /> : <Zap size={21} strokeWidth={2.7} />} Quick Match — find a rival now!
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => online("create_room")} disabled={!!busy} className="btn-game btn-blue py-3.5 flex items-center justify-center gap-1.5">
+                {busy === "create_room" ? <Loader2 className="animate-spin" size={18} /> : <Plus size={18} strokeWidth={2.8} />} Create room
+              </button>
+              <div className="flex gap-1.5">
+                <input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6))}
+                  placeholder="CODE" className="input-game w-full px-2 py-2 font-display font-bold text-center tracking-[0.2em] uppercase" />
+              </div>
+            </div>
+            <button onClick={() => online("join_room")} disabled={!!busy || joinCode.length < 4} className="btn-game btn-purple w-full py-3 flex items-center justify-center gap-2">
+              {busy === "join_room" ? <Loader2 className="animate-spin" size={18} /> : <KeyRound size={18} strokeWidth={2.6} />} Join with code
+            </button>
+            {onlineError && <p className="text-sm font-black rounded-xl px-3 py-2 animate-pop" style={{ background: "rgba(255,75,75,0.14)", color: "#D33131" }}>{onlineError}</p>}
+            <p className="text-[11px] font-bold text-center" style={{ color: "var(--ink-faint)" }}>
+              Quick Match pairs you instantly. Create a room to get a code you can share with a friend. If you get disconnected, come back and tap Rejoin — your match waits for you!
+            </p>
+          </div>
+        )}
+
+        {step === "hotseat" && (
+          <div className="space-y-3">
+            <div className="flex justify-center items-end gap-3 py-2">
+              <CharacterAvatar config={me.avatarConfig} frameId={me.frameId} size={84} ringWidth={4} mood="happy" />
+              <span className="font-display font-bold text-xl pb-6" style={{ color: "var(--ink-faint)" }}>VS</span>
+              <CharacterAvatar config={{ base: "cat", color: "sky", accessory: "cap" }} frameId="frame_neon" size={84} ringWidth={4} mood="happy" />
+            </div>
+            <p className="text-sm font-bold text-center" style={{ color: "var(--ink-soft)" }}>
+              {me.username} hides a code, passes the device, Player 2 hides theirs — then take turns guessing. The screen hides between turns so nobody can peek!
+            </p>
+            <TimerChips options={[15, 30, 45, 60, 0]} value={timer} set={setTimer} />
+            <button onClick={() => onStartHotseat(timer)} className="btn-game btn-green w-full py-4 text-xl flex items-center justify-center gap-2">
+              <Users size={21} strokeWidth={2.6} /> Start 2-player duel
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------- Rank ------------------------------- */
+
+function RankScreen({ leaderboard, me, onBack, onRefresh }: {
+  leaderboard: LeaderboardRow[]; me: Player; onBack: () => void; onRefresh: () => void;
+}) {
+  const myIdx = leaderboard.findIndex((r) => r.id === me.id);
+  return (
+    <div className="max-w-3xl mx-auto px-3 sm:px-5 pb-16 animate-fade">
+      <div className="flex items-center gap-2 py-3 sticky top-0 z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
+        <button onClick={onBack} className="btn-game btn-ghost w-10 h-10 !rounded-xl flex items-center justify-center"><ArrowLeft size={19} strokeWidth={2.8} /></button>
+        <h2 className="font-display font-bold text-2xl flex-1">Leaderboard</h2>
+        <button onClick={onRefresh} className="btn-game btn-ghost px-3 py-2 text-xs">Refresh</button>
+      </div>
+
+      {/* divisions overview */}
+      <div className="card-game p-3 mb-3">
+        <p className="text-[11px] font-black uppercase tracking-widest mb-2" style={{ color: "var(--ink-faint)" }}>Road to Legend — win matches to earn trophies</p>
+        <div className="flex gap-1 overflow-x-auto no-scrollbar">
+          {DIVISIONS.map((d) => (
+            <span key={d.name} className="shrink-0 rounded-xl px-2.5 py-1.5 text-center" style={{ background: d.gradient, opacity: me.trophies >= d.minTrophies ? 1 : 0.45 }}>
+              <span className="block text-white font-black text-[11px] leading-none" style={{ textShadow: "0 1px 2px rgba(0,0,0,.4)" }}>{d.name}</span>
+              <span className="block text-white/90 font-black text-[9px]">{d.minTrophies}+</span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {myIdx >= 0 && (
+        <div className="rounded-2xl p-3 mb-3 flex items-center gap-3" style={{ background: "linear-gradient(135deg, rgba(88,204,2,.22), rgba(28,176,246,.18))", border: "2px solid #58CC02" }}>
+          <span className="font-display font-bold text-2xl">#{myIdx + 1}</span>
+          <CharacterAvatar config={me.avatarConfig} frameId={me.frameId} size={44} ringWidth={3} />
+          <div className="flex-1">
+            <p className="font-display font-semibold leading-tight">You</p>
+            <p className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>{me.wins} wins · {me.totalGames} games</p>
+          </div>
+          <DivisionBadge trophies={me.trophies} />
+          <span className="font-black flex items-center gap-1"><Trophy size={15} style={{ color: "#E0A800" }} />{me.trophies}</span>
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        {leaderboard.length === 0 && <p className="text-center font-bold py-10" style={{ color: "var(--ink-faint)" }}>No ranked players yet — be the first Legend!</p>}
+        {leaderboard.map((r, i) => (
+          <div key={r.id} className="card-game px-3 py-2 flex items-center gap-2.5 animate-rise" style={r.id === me.id ? { borderColor: "#58CC02" } : undefined}>
+            <span className={`font-display font-bold w-8 text-center text-lg`} style={{ color: i === 0 ? "#E0A800" : i === 1 ? "#8A97AD" : i === 2 ? "#B0703C" : "var(--ink-soft)" }}>
+              {i < 3 ? <Medal size={22} className="mx-auto" /> : i + 1}
+            </span>
+            <span className="relative">
+              <CharacterAvatar config={r.avatarConfig} frameId={r.frameId} size={42} ringWidth={3} />
+              {r.isOnline && <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white" style={{ background: "#58CC02" }} />}
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="font-black text-sm block truncate">{r.username}{r.id === me.id ? " (you)" : ""}</span>
+              <span className="text-[11px] font-bold block" style={{ color: "var(--ink-faint)" }}>{r.title} · {r.wins} wins · {r.streakDays}d streak</span>
+            </span>
+            <DivisionBadge trophies={r.trophies} size="sm" />
+            <span className="font-black text-sm flex items-center gap-1 w-16 justify-end"><Trophy size={14} style={{ color: "#E0A800" }} />{r.trophies}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------- Profile ------------------------------- */
+
+function ProfileModal({ me, rank, onClose, onCustomize, onLogout, isGuest }: {
+  me: Player; rank: number | null; onClose: () => void; onCustomize: () => void; onLogout: () => void; isGuest: boolean;
+}) {
+  const winRate = me.totalGames ? Math.round((me.wins / me.totalGames) * 100) : 0;
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/45 backdrop-blur-[2px] animate-fade" onClick={onClose} />
+      <div className="relative card-game w-full sm:max-w-lg max-h-[92dvh] overflow-y-auto pretty-scroll rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up">
+        <div className="board-theme p-5 pb-4 rounded-t-[1.4rem]" data-board={me.themeId}>
+          <button onClick={onClose} className="btn-game w-9 h-9 !rounded-xl flex items-center justify-center float-right"
+            style={{ background: "var(--board-key)", color: "var(--board-ink)", border: "2px solid var(--board-border)", boxShadow: "0 3px 0 var(--board-border)" }}>
+            <X size={17} strokeWidth={2.8} />
+          </button>
+          <div className="flex flex-col items-center text-center clear-both">
+            <CharacterAvatar config={me.avatarConfig} frameId={me.frameId} size={130} ringWidth={5} mood="happy" />
+            <h3 className="font-display font-bold text-2xl mt-1" style={{ color: "var(--board-ink)" }}>{me.username}</h3>
+            <p className="text-[11px] font-black uppercase tracking-widest" style={{ color: "var(--board-soft)" }}>{me.title}{isGuest ? " · Guest" : ""}</p>
+            <div className="flex items-center gap-2 mt-2">
+              <DivisionBadge trophies={me.trophies} />
+              {rank && <span className="chip px-2 py-1 text-[11px] font-black">Rank #{rank}</span>}
+              <span className="chip px-2 py-1 text-[11px] font-black flex items-center gap-1"><Flame size={12} style={{ color: "#FF7A18" }} fill="#FF7A18" /> {me.streakDays} days</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-4">
+          <div className="grid grid-cols-4 gap-2 text-center">
+            {[
+              { v: me.trophies, l: "Trophies" }, { v: me.wins, l: "Wins" },
+              { v: `${winRate}%`, l: "Win rate" }, { v: me.level, l: "Level" },
+              { v: me.totalGames, l: "Games" }, { v: me.losses, l: "Losses" },
+              { v: me.fastestWinTurns ?? "—", l: "Fastest win" }, { v: me.xp, l: "Total XP" },
+            ].map((s) => (
+              <div key={s.l} className="rounded-2xl py-2.5 px-1" style={{ background: "var(--surface-3)", border: "2px solid var(--border)" }}>
+                <p className="font-display font-bold text-lg leading-none">{s.v}</p>
+                <p className="text-[9px] font-black uppercase tracking-wide mt-1" style={{ color: "var(--ink-faint)" }}>{s.l}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex gap-2">
+            <span className="chip flex-1 py-2.5 font-black flex items-center justify-center gap-1.5"><Coins size={17} style={{ color: "#E0A800" }} /> {me.coins.toLocaleString()} coins</span>
+            <span className="chip flex-1 py-2.5 font-black flex items-center justify-center gap-1.5"><Gem size={17} style={{ color: "#1CB0F6" }} /> {me.gems.toLocaleString()} gems</span>
+          </div>
+
+          <div>
+            <h4 className="font-display font-semibold mb-2">Achievements ({me.completedAchievements.length}/{ACHIEVEMENTS.length})</h4>
+            <div className="grid grid-cols-2 gap-1.5">
+              {ACHIEVEMENTS.map((a) => {
+                const has = me.completedAchievements.includes(a.id);
+                return (
+                  <div key={a.id} className="rounded-2xl p-2.5 flex items-start gap-2" style={{
+                    background: has ? "rgba(255,200,0,0.14)" : "var(--surface-3)",
+                    border: `2px solid ${has ? "#FFC800" : "var(--border)"}`, opacity: has ? 1 : 0.65,
+                  }}>
+                    <span className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-white" style={{ background: has ? "#E0A800" : "var(--border-strong)" }}>
+                      {has ? <Medal size={17} strokeWidth={2.5} /> : <Lock size={15} />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="font-black text-[12px] block leading-tight">{a.title}</span>
+                      <span className="text-[10px] font-bold block leading-tight" style={{ color: "var(--ink-soft)" }}>{a.description}</span>
+                      <span className="text-[10px] font-black flex items-center gap-0.5" style={{ color: "#1CB0F6" }}>+{a.rewardGems} <Gem size={10} /></span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 pb-1">
+            <button onClick={onCustomize} className="btn-game btn-purple py-3 flex items-center justify-center gap-2">
+              <ShoppingBag size={17} strokeWidth={2.6} /> Customize
+            </button>
+            <button onClick={onLogout} className="btn-game btn-ghost py-3 flex items-center justify-center gap-2">
+              <DoorOpen size={17} strokeWidth={2.6} /> {isGuest ? "Exit guest" : "Log out"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

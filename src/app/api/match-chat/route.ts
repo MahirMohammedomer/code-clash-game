@@ -1,149 +1,123 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { chatMessages, matchReactions, players } from "@/db/schema";
+import { matches, matchChatMessages, matchReactions } from "@/db/schema";
 import { ensureDatabaseReady } from "@/db/seed";
-import { eq, desc, and, or } from "drizzle-orm";
-import { rateLimit, sanitizeText, assertPlayerId } from "@/lib/security";
+import { eq, and, gt, asc } from "drizzle-orm";
+import { rateLimit, sanitizeText } from "@/lib/security";
+import { REACTION_IDS, QUICK_PHRASES } from "@/lib/game-engine";
 
-const ALLOWED_REACTIONS = ["👍", "🔥", "😱", "😂", "💪", "🎯", "😤", "👀"];
+/**
+ * Private in-match chat + reactions between the two players of a room.
+ * Auth = the room slot token (works for guests too).
+ * Polling uses id cursors (sinceChat / sinceReact) so it stays cheap.
+ */
+
+async function authSlot(roomCode: string, token: string) {
+  const rows = await db.select().from(matches).where(eq(matches.roomCode, roomCode)).limit(1);
+  const m = rows[0];
+  if (!m) return null;
+  if (token && m.p1Token === token) return { match: m, slot: 1 as const, name: m.player1Name };
+  if (token && m.p2Token === token) return { match: m, slot: 2 as const, name: m.player2Name };
+  return null;
+}
 
 export async function GET(req: NextRequest) {
   try {
     await ensureDatabaseReady();
     const { searchParams } = new URL(req.url);
-    const roomCode = (searchParams.get("roomCode") || "").toUpperCase();
-    const playerId = assertPlayerId(searchParams.get("playerId"));
-    const opponentId = assertPlayerId(searchParams.get("opponentId"));
+    const roomCode = (searchParams.get("roomCode") || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const sinceChat = Number(searchParams.get("sinceChat") || 0);
+    const sinceReact = Number(searchParams.get("sinceReact") || 0);
+    if (!roomCode) return NextResponse.json({ messages: [], reactions: [] });
 
-    if (!roomCode) {
-      return NextResponse.json({ error: "roomCode required" }, { status: 400 });
-    }
-
-    // Private messages between the two players in this match
-    let messages: any[] = [];
-    if (playerId && opponentId) {
-      messages = await db
-        .select()
-        .from(chatMessages)
-        .where(
-          or(
-            and(
-              eq(chatMessages.senderId, playerId),
-              eq(chatMessages.receiverId, opponentId)
-            ),
-            and(
-              eq(chatMessages.senderId, opponentId),
-              eq(chatMessages.receiverId, playerId)
-            )
-          )
-        )
-        .orderBy(desc(chatMessages.createdAt))
-        .limit(50);
-      messages = messages.reverse();
-    }
+    const messages = await db
+      .select()
+      .from(matchChatMessages)
+      .where(and(eq(matchChatMessages.roomCode, roomCode), gt(matchChatMessages.id, sinceChat)))
+      .orderBy(asc(matchChatMessages.id))
+      .limit(100);
 
     const reactions = await db
       .select()
       .from(matchReactions)
-      .where(eq(matchReactions.roomCode, roomCode))
-      .orderBy(desc(matchReactions.createdAt))
-      .limit(30);
+      .where(and(eq(matchReactions.roomCode, roomCode), gt(matchReactions.id, sinceReact)))
+      .orderBy(asc(matchReactions.id))
+      .limit(50);
 
     return NextResponse.json({
-      messages,
-      reactions: reactions.reverse(),
+      messages: messages.map((x) => ({
+        id: x.id,
+        senderSlot: x.senderSlot,
+        senderName: x.senderName,
+        content: x.content,
+        createdAt: new Date(x.createdAt).toISOString(),
+      })),
+      reactions: reactions.map((x) => ({
+        id: x.id,
+        senderSlot: x.senderSlot,
+        senderName: x.senderName,
+        reaction: x.emoji,
+        createdAt: new Date(x.createdAt).toISOString(),
+      })),
     });
-  } catch (e) {
-    console.error("match-chat GET", e);
-    return NextResponse.json({ error: "Failed to load" }, { status: 500 });
+  } catch (error) {
+    console.error("GET /api/match-chat error:", error);
+    return NextResponse.json({ messages: [], reactions: [] });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     await ensureDatabaseReady();
-    const body = await req.json();
-    const { action, roomCode, playerId, playerName, content, emoji, opponentId } =
-      body;
+    const body = await req.json().catch(() => ({}));
+    const roomCode = String(body.roomCode || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const auth = await authSlot(roomCode, String(body.token || ""));
+    if (!auth) return NextResponse.json({ error: "Not in this match" }, { status: 403 });
 
-    const pid = assertPlayerId(playerId);
-    const code = String(roomCode || "").toUpperCase().slice(0, 20);
+    const rl = rateLimit(`mc:${roomCode}:${auth.slot}`, 20, 30000);
+    if (!rl.ok) return NextResponse.json({ error: "Slow down a little!" }, { status: 429 });
 
-    if (!code) {
-      return NextResponse.json({ error: "roomCode required" }, { status: 400 });
+    if (body.action === "message") {
+      const content = sanitizeText(body.content, 220);
+      if (!content) return NextResponse.json({ error: "Empty message" }, { status: 400 });
+      const [row] = await db
+        .insert(matchChatMessages)
+        .values({ roomCode, senderSlot: auth.slot, senderName: auth.name, content })
+        .returning();
+      return NextResponse.json({
+        message: { id: row.id, senderSlot: row.senderSlot, senderName: row.senderName, content: row.content, createdAt: new Date(row.createdAt).toISOString() },
+      });
     }
 
-    if (action === "react") {
-      if (!ALLOWED_REACTIONS.includes(emoji)) {
-        return NextResponse.json({ error: "Invalid reaction" }, { status: 400 });
-      }
-      const rl = rateLimit(`react_${pid || playerName}_${code}`, 12, 15000);
-      if (!rl.ok) {
-        return NextResponse.json(
-          { error: "Too many reactions" },
-          { status: 429 }
-        );
-      }
+    if (body.action === "phrase") {
+      const phrase = String(body.phrase || "");
+      if (!QUICK_PHRASES.includes(phrase)) return NextResponse.json({ error: "Unknown phrase" }, { status: 400 });
+      const [row] = await db
+        .insert(matchChatMessages)
+        .values({ roomCode, senderSlot: auth.slot, senderName: auth.name, content: phrase })
+        .returning();
+      return NextResponse.json({
+        message: { id: row.id, senderSlot: row.senderSlot, senderName: row.senderName, content: row.content, createdAt: new Date(row.createdAt).toISOString() },
+      });
+    }
 
+    if (body.action === "reaction") {
+      const reaction = String(body.reaction || "");
+      if (!(REACTION_IDS as readonly string[]).includes(reaction)) {
+        return NextResponse.json({ error: "Unknown reaction" }, { status: 400 });
+      }
       const [row] = await db
         .insert(matchReactions)
-        .values({
-          matchId: 0,
-          roomCode: code,
-          senderId: pid,
-          senderName: sanitizeText(playerName || "Player", 20),
-          emoji,
-        })
+        .values({ matchId: auth.match.id, roomCode, senderSlot: auth.slot, senderName: auth.name, emoji: reaction })
         .returning();
-
-      return NextResponse.json({ reaction: row });
+      return NextResponse.json({
+        reaction: { id: row.id, senderSlot: row.senderSlot, senderName: row.senderName, reaction: row.emoji, createdAt: new Date(row.createdAt).toISOString() },
+      });
     }
 
-    // Default: send private message to opponent
-    if (!pid) {
-      return NextResponse.json(
-        { error: "Login required to chat in match" },
-        { status: 401 }
-      );
-    }
-
-    const clean = sanitizeText(content, 200);
-    if (!clean) {
-      return NextResponse.json({ error: "Empty message" }, { status: 400 });
-    }
-
-    const rl = rateLimit(`mchat_${pid}`, 8, 12000);
-    if (!rl.ok) {
-      return NextResponse.json(
-        { error: "Sending too fast" },
-        { status: 429 }
-      );
-    }
-
-    const [player] = await db
-      .select()
-      .from(players)
-      .where(eq(players.id, pid))
-      .limit(1);
-
-    if (!player) {
-      return NextResponse.json({ error: "Player not found" }, { status: 404 });
-    }
-
-    const [msg] = await db
-      .insert(chatMessages)
-      .values({
-        senderId: player.id,
-        senderName: player.username,
-        senderAvatar: player.avatarEmoji || "🦉",
-        receiverId: opponentId ? Number(opponentId) : null,
-        content: clean,
-      })
-      .returning();
-
-    return NextResponse.json({ message: msg });
-  } catch (e) {
-    console.error("match-chat POST", e);
-    return NextResponse.json({ error: "Failed" }, { status: 500 });
+    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+  } catch (error) {
+    console.error("POST /api/match-chat error:", error);
+    return NextResponse.json({ error: "Failed to send" }, { status: 500 });
   }
 }

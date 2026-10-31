@@ -1,54 +1,53 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import { Fredoka, Nunito, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const fredoka = Fredoka({
-  subsets: ["latin"],
-  weight: ["600", "700"],
-  variable: "--font-fredoka",
-});
-
-const nunito = Nunito({
-  subsets: ["latin"],
-  weight: ["600", "700", "800", "900"],
-  variable: "--font-nunito",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["700", "800"],
-  variable: "--font-mono",
-});
-
 export const metadata: Metadata = {
-  title: "Code Clash — Competitive 4-Digit Code Breaker",
+  title: "Cipher Clash — Crack the Code, Beat Your Rival!",
   description:
-    "Crack the 4-digit secret code before your rival! Play Online 1v1, vs 4-Tier AI, Hotseat, Local Offline, and Tournaments.",
+    "A fast, friendly code-cracking duel game. Hide your 4-digit secret, crack your rival's first! Battle 4 animated AI bots, play online 1v1, customize your character, and climb from Bronze to Legend.",
   manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Code Clash",
+    title: "Cipher Clash",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#58CC02",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#FFF8EA" },
+    { media: "(prefers-color-scheme: dark)", color: "#12141F" },
+  ],
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
+  viewportFit: "cover",
 };
+
+// Runs before paint so dark mode never flashes the wrong theme.
+const themeScript = `
+try {
+  var t = localStorage.getItem('cipherclash_theme');
+  if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', t);
+} catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+`;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html
-      lang="en"
-      className={`${fredoka.variable} ${nunito.variable} ${jetbrainsMono.variable}`}
-    >
-      <body className="bg-[#FFFDF7] text-[#2B2D42] font-sans antialiased selection:bg-[#58CC02]/20">
-        {children}
-      </body>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
+      <body className="font-sans antialiased">{children}</body>
     </html>
   );
 }

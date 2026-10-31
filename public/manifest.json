@@ -1,18 +1,41 @@
 {
-  "name": "Code Clash — Competitive 4-Digit Code Breaker",
-  "short_name": "Code Clash",
-  "description": "Playful, Duolingo-inspired competitive 4-digit code-breaking arena game with 1v1 Multiplayer, 4-Tier AI, Hotseat, Local Offline, Season Pass & Tournaments.",
+  "name": "Cipher Clash — Crack the Code!",
+  "short_name": "Cipher Clash",
+  "description": "Hide your 4-digit secret code and race to crack your rival's first! Battle 4 animated AI bots, play online 1v1 with chat & reactions, customize your character, and climb from Bronze to Legend.",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#FFFDF7",
-  "theme_color": "#58CC02",
   "orientation": "portrait-primary",
+  "background_color": "#FFF8EA",
+  "theme_color": "#58CC02",
+  "categories": ["games", "entertainment"],
   "icons": [
     {
-      "src": "/icon-192.svg",
-      "sizes": "192x192 512x512",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Play now",
+      "short_name": "Play",
+      "url": "/",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
 }
