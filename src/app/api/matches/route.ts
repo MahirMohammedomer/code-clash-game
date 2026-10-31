@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { matches, MatchGuessEntry } from "@/db/schema";
 import { ensureDatabaseReady } from "@/db/seed";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import {
   evaluateGuess,
   isValidSecretCode,
 } from "@/lib/game-engine";
+
+function safeMatch<T extends {player1Secret: string; player2Secret: string}>(match: T) {
+  return { ...match, player1Secret: "", player2Secret: "" };
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -103,7 +107,7 @@ export async function POST(req: NextRequest) {
         })
         .returning();
 
-      return NextResponse.json({ match: created });
+      return NextResponse.json({ match: safeMatch(created) });
     }
 
     // 2. Join an existing Room (by roomCode) as Player 2
@@ -130,6 +134,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      if (existing.status !== "waiting") return NextResponse.json({ error: "This room is already full." }, { status: 409 });
       const nextSecret2 = isValidSecretCode(player2Secret)
         ? player2Secret
         : existing.player2Secret;
@@ -149,10 +154,11 @@ export async function POST(req: NextRequest) {
           player2Secret: nextSecret2,
           turnStartedAt: new Date(),
         })
-        .where(eq(matches.id, existing.id))
+        .where(and(eq(matches.id, existing.id), eq(matches.status, "waiting")))
         .returning();
 
-      return NextResponse.json({ match: updated });
+      if (!updated) return NextResponse.json({ error: "Room was just joined by another player." }, { status: 409 });
+      return NextResponse.json({ match: safeMatch(updated) });
     }
 
     // 3. Lock in Secret Code for Player 1 or Player 2 in a Room
@@ -175,23 +181,15 @@ export async function POST(req: NextRequest) {
       }
 
       const slot: 1 | 2 = playerSlot === 2 ? 2 : 1;
-      const nextP1Secret = slot === 1 ? secret : existing.player1Secret;
-      const nextP2Secret = slot === 2 ? secret : existing.player2Secret;
-      const bothReady =
-        isValidSecretCode(nextP1Secret) && isValidSecretCode(nextP2Secret);
-
-      const [updated] = await db
-        .update(matches)
-        .set({
-          player1Secret: nextP1Secret,
-          player2Secret: nextP2Secret,
-          status: bothReady ? "playing" : existing.status === "waiting" ? "waiting" : "setup",
-          turnStartedAt: new Date(),
-        })
-        .where(eq(matches.id, existing.id))
-        .returning();
-
-      return NextResponse.json({ match: updated });
+      // Each player only writes their own secret. SQL evaluates readiness against the
+      // current row, so simultaneous locks cannot overwrite one another.
+      const [updated] = await db.update(matches).set({
+        ...(slot === 1 ? { player1Secret: secret } : { player2Secret: secret }),
+        status: sql`CASE WHEN ${slot === 1 ? matches.player2Secret : matches.player1Secret} <> '' AND ${matches.status} <> 'waiting' THEN 'playing' ELSE ${matches.status} END`,
+        turnStartedAt: sql`CASE WHEN ${slot === 1 ? matches.player2Secret : matches.player1Secret} <> '' AND ${matches.status} <> 'waiting' THEN NOW() ELSE ${matches.turnStartedAt} END`,
+      }).where(and(eq(matches.id, existing.id), sql`${matches.status} IN ('waiting', 'setup')`)).returning();
+      if (!updated) return NextResponse.json({ error: "This match has already started." }, { status: 409 });
+      return NextResponse.json({ match: safeMatch(updated) });
     }
 
     // 4. Submit a Real Guess or Timeout in a Room
@@ -206,10 +204,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Match not found" }, { status: 404 });
       }
       if (match.status === "finished") {
-        return NextResponse.json({ match });
+        return NextResponse.json({ match: safeMatch(match) });
       }
 
       const slot: 1 | 2 = playerSlot === 2 ? 2 : 1;
+      if (match.status !== "playing" || match.currentTurn !== slot) return NextResponse.json({ error: "Not your turn yet." }, { status: 409 });
+      if (!isTimeout && !isValidSecretCode(guess)) return NextResponse.json({ error: "Enter four unique digits from 1 to 9." }, { status: 400 });
+      if (isTimeout && (match.timerSeconds <= 0 || Date.now() < new Date(match.turnStartedAt).getTime() + match.timerSeconds * 1000 - 500)) return NextResponse.json({ error: "Turn has not timed out yet." }, { status: 409 });
       const targetSecret = slot === 1 ? match.player2Secret : match.player1Secret;
 
       if (!isTimeout && !isValidSecretCode(targetSecret)) {
@@ -272,10 +273,11 @@ export async function POST(req: NextRequest) {
           currentTurn: nextTurn,
           turnStartedAt: new Date(),
         })
-        .where(eq(matches.id, match.id))
+        .where(and(eq(matches.id, match.id), eq(matches.status, "playing"), eq(matches.currentTurn, slot), eq(matches.turnStartedAt, match.turnStartedAt)))
         .returning();
 
-      return NextResponse.json({ match: updated });
+      if (!updated) return NextResponse.json({ error: "Turn already changed. Syncing match." }, { status: 409 });
+      return NextResponse.json({ match: safeMatch(updated) });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

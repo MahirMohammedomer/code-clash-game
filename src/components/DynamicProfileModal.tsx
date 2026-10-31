@@ -137,7 +137,7 @@ export default function DynamicProfileModal({
       await onAuthAction({
         mode: authMode,
         username: usernameInput.trim(),
-        password: passwordInput || "clash123",
+        password: passwordInput,
         avatarEmoji: selectedEmoji,
       });
       setUsernameInput("");

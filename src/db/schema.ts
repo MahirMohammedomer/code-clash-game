@@ -81,6 +81,7 @@ export const players = pgTable("players", {
   coins: integer("coins").notNull().default(0),
   gems: integer("gems").notNull().default(0),
   streakDays: integer("streak_days").notNull().default(1),
+  lastPlayedDate: text("last_played_date"),
   wins: integer("wins").notNull().default(0),
   losses: integer("losses").notNull().default(0),
   totalGames: integer("total_games").notNull().default(0),

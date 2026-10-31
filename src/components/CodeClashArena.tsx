@@ -33,6 +33,7 @@ import {
   Check,
   Lightbulb,
 } from "lucide-react";
+import BotMascot from "@/components/BotMascot";
 import MatchReplay from "@/components/MatchReplay";
 import MatchSideChat from "@/components/MatchSideChat";
 
@@ -122,6 +123,7 @@ export default function CodeClashArena({
   const [guessBuffer, setGuessBuffer] = useState<string>("");
   const [showMySecret, setShowMySecret] = useState<boolean>(false);
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
+  const [opponentId, setOpponentId] = useState<number | null>(null);
   const [roomError, setRoomError] = useState<string | null>(null);
 
   const [currentTurn, setCurrentTurn] = useState<1 | 2>(1);
@@ -142,13 +144,16 @@ export default function CodeClashArena({
   );
   const matchStartRef = useRef<number>(Date.now());
   const rewardReportedRef = useRef<boolean>(false);
+  const completionRef = useRef(onMatchComplete);
+  completionRef.current = onMatchComplete;
 
-  const themeSurface =
-    themeId === "theme_cyber"
-      ? "bg-sky-50/90 border-sky-200"
-      : themeId === "theme_royal"
-      ? "bg-purple-50/90 border-purple-200"
-      : "bg-[#FFFDF7] border-[#E5E0D5]";
+  const themeSurfaces: Record<string, string> = {
+    theme_cyber: "bg-sky-50 border-sky-300", theme_royal: "bg-purple-50 border-purple-300",
+    theme_midnight: "bg-slate-100 border-slate-500", theme_sunset: "bg-orange-50 border-orange-300",
+    theme_forest: "bg-emerald-50 border-emerald-300", theme_candy: "bg-pink-50 border-pink-300",
+    theme_ice: "bg-cyan-50 border-cyan-300",
+  };
+  const themeSurface = themeSurfaces[themeId] || "bg-[#FFFDF7] border-[#E5E0D5]";
 
   const triggerConfetti = useCallback(() => {
     try {
@@ -200,7 +205,7 @@ export default function CodeClashArena({
             : 140
           : 40;
 
-        onMatchComplete({
+        completionRef.current({
           won,
           turnsTaken: myTurns,
           trophyDelta,
@@ -215,7 +220,6 @@ export default function CodeClashArena({
       aiProfile,
       isPlayer2Seat,
       mode,
-      onMatchComplete,
       triggerConfetti,
     ]
   );
@@ -237,6 +241,10 @@ export default function CodeClashArena({
         const data = await res.json();
         if (data.match) {
           const m = data.match;
+          if (m.status === "playing" && timerOption > 0 && m.turnStartedAt && Date.now() >= new Date(m.turnStartedAt).getTime() + timerOption * 1000) {
+            fetch("/api/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "submit_turn", roomCode, playerSlot: m.currentTurn, isTimeout: true }) }).catch(() => {});
+          }
+          setOpponentId(isPlayer2Seat ? m.player1Id : m.player2Id);
           if (!isPlayer2Seat && m.player2Name) {
             setLiveOpponentName(m.player2Name);
             setLiveOpponentAvatar(m.player2Avatar || "🦊");
@@ -251,8 +259,7 @@ export default function CodeClashArena({
           // Transition from waiting_opponent -> playing once both secrets are locked in
           if (
             phase === "waiting_opponent" &&
-            isValidSecretCode(m.player1Secret) &&
-            isValidSecretCode(m.player2Secret)
+            m.status === "playing"
           ) {
             setPhase("playing");
             if (timerOption > 0) setSecondsLeft(timerOption);
@@ -264,9 +271,9 @@ export default function CodeClashArena({
           if (serverGuesses.length !== guesses.length) {
             setGuesses(serverGuesses);
           }
+          if (timerOption > 0 && m.status === "playing" && m.turnStartedAt) setSecondsLeft(Math.max(0, Math.ceil((new Date(m.turnStartedAt).getTime() + timerOption * 1000 - Date.now()) / 1000)));
           if (m.currentTurn !== currentTurn) {
             setCurrentTurn(m.currentTurn === 2 ? 2 : 1);
-            if (timerOption > 0) setSecondsLeft(timerOption);
           }
           if (m.status === "finished" && m.winnerSlot) {
             finalizeMatch(m.winnerSlot === 2 ? 2 : 1, serverGuesses);
@@ -306,6 +313,11 @@ export default function CodeClashArena({
   useEffect(() => {
     if (phase !== "playing" || timerOption === 0 || secondsLeft > 0) return;
 
+    if ((mode === "online_1v1" || mode === "local_offline") && roomCode) {
+      // The server is authoritative; both clients may safely attempt a timeout.
+      fetch("/api/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "submit_turn", roomCode, playerSlot: currentTurn, isTimeout: true }) }).catch(() => setRoomError("Connection lost. Reconnecting…"));
+      return;
+    }
     soundEngine.playTimeout();
     const timedOutSlot = currentTurn;
     const turnCount =
@@ -348,6 +360,7 @@ export default function CodeClashArena({
     player1Name,
     liveOpponentName,
     mode,
+    roomCode,
   ]);
 
   // AI Turn Execution
@@ -487,10 +500,10 @@ export default function CodeClashArena({
             }),
           });
           const data = await res.json();
+          if (!res.ok) { setSetupBuffer(chosen); setRoomError(data.error || "Could not lock your code. Try again."); return; }
           if (
             data.match &&
-            isValidSecretCode(data.match.player1Secret) &&
-            isValidSecretCode(data.match.player2Secret)
+            data.match.status === "playing"
           ) {
             setP1Secret(data.match.player1Secret);
             setP2Secret(data.match.player2Secret);
@@ -502,7 +515,9 @@ export default function CodeClashArena({
           }
           return;
         } catch {
-          setPhase("playing");
+          setSetupBuffer(chosen);
+          setRoomError("Could not lock your code. Check your connection and try again.");
+          return;
         }
       }
 
@@ -589,6 +604,7 @@ export default function CodeClashArena({
         });
         const data = await res.json();
         if (!res.ok || data.error) {
+          setGuessBuffer(currentGuess);
           setRoomError(data.error || "Waiting for opponent...");
           return;
         }
@@ -614,6 +630,7 @@ export default function CodeClashArena({
           return;
         }
       } catch {
+        setGuessBuffer(currentGuess);
         setRoomError("Connection error — please try again.");
         return;
       }
@@ -698,7 +715,7 @@ export default function CodeClashArena({
       className={`rounded-3xl border-2 border-b-[6px] p-4 shadow-lg transition-all ${themeSurface}`}
     >
       {/* Top Arena Header */}
-      <div className="flex items-center justify-between gap-2 pb-3 mb-3 border-b-2 border-[#E5E0D5]">
+      <div className="sticky top-0 z-30 bg-white flex items-center justify-between gap-2 py-3 mb-3 border-b-2 border-[#E5E0D5]">
         <button
           onClick={() => {
             soundEngine.playTap(380);
@@ -757,6 +774,8 @@ export default function CodeClashArena({
           </button>
         </div>
       </div>
+
+      {roomError && phase !== "playing" && <div role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-sm font-bold text-rose-700">{roomError}</div>}
 
       {/* STEP-BY-STEP GUIDED COACH BANNER */}
       <div className="mb-3 px-3.5 py-2.5 rounded-2xl bg-lime-50 border-2 border-[#58CC02]/40 flex items-start gap-2.5">
@@ -829,7 +848,7 @@ export default function CodeClashArena({
           }`}
         >
           <div className="w-10 h-10 rounded-xl bg-white border-2 border-[#58CC02] flex items-center justify-center text-xl shrink-0">
-            {player1Avatar}
+            <span className="mascot">{player1Avatar}</span>
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-xs font-extrabold text-[#2B2D42] truncate">
@@ -875,7 +894,7 @@ export default function CodeClashArena({
           }`}
         >
           <div className="w-10 h-10 rounded-xl bg-white border-2 border-[#1CB0F6] flex items-center justify-center text-xl shrink-0">
-            {liveOpponentAvatar}
+            {mode === "ai" ? <BotMascot difficulty={aiDifficulty} mood={phase === "finished" ? (winnerSlot === 2 ? "win" : "lose") : currentTurn === 2 && phase === "playing" ? "thinking" : "idle"} /> : <span className="mascot">{liveOpponentAvatar}</span>}
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-xs font-extrabold text-[#2B2D42] truncate">
@@ -1162,9 +1181,9 @@ export default function CodeClashArena({
         <MatchSideChat
           roomCode={roomCode || "LOCAL"}
           playerId={player1Id ?? null}
-          playerName={isPlayer2Seat ? liveOpponentName : player1Name}
-          opponentId={null}
-          opponentName={isPlayer2Seat ? player1Name : liveOpponentName}
+          playerName={player1Name}
+          opponentId={opponentId}
+          opponentName={liveOpponentName}
         />
       )}
 
