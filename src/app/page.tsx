@@ -6,7 +6,7 @@ import {
   Globe, GraduationCap, KeyRound, Loader2, Lock, LogOut, Medal, MessageSquare,
   Moon, Play, Plus, Settings, Shield, ShoppingBag, Star, Sun, Swords, Target, Trophy,
   User, Users, Volume2, VolumeX, Zap, Crown, Timer, Sparkles, X, DoorOpen,
-  Bell, BellOff, Eye, History, QrCode, UserPlus, Wifi,
+  Bell, BellOff, Eye, Gamepad2, History, QrCode, UserPlus, Wifi,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import GameBoard, { type GameConfig, type GameOutcome } from "@/components/GameBoard";
@@ -22,6 +22,7 @@ const Spectate = dynamic(() => import("@/components/Spectate"), { loading: () =>
 const MatchHistory = dynamic(() => import("@/components/MatchHistory"), { loading: () => <ScreenLoading label="Loading your replays..." /> });
 const DailyCode = dynamic(() => import("@/components/DailyCode"), { loading: () => <ScreenLoading label="Hiding today's code..." /> });
 const Tournament = dynamic(() => import("@/components/Tournament"), { loading: () => <ScreenLoading label="Loading hunts..." /> });
+const MoreGames = dynamic(() => import("@/components/MoreGames"), { loading: () => <ScreenLoading label="Opening the arcade..." /> });
 import { Character, CharacterAvatar } from "@/components/Character";
 import {
   ACHIEVEMENTS, AI_BOTS, DAILY_QUESTS, DIVISIONS, currentSeasonId, emptyDailyStats, getDailyChallenge,
@@ -38,7 +39,7 @@ import {
 import { soundEngine } from "@/lib/sound-effects";
 import type { InviteView, LeaderboardRow, Player, RoomSession, SeasonInfo, SocialPlayer } from "@/lib/types";
 
-type Screen = "boot" | "welcome" | "home" | "shop" | "rank" | "community" | "game" | "friends" | "history" | "dailycode" | "tournaments" | "spectate";
+type Screen = "boot" | "welcome" | "home" | "shop" | "rank" | "community" | "game" | "friends" | "history" | "dailycode" | "tournaments" | "spectate" | "moregames";
 
 interface Toast { id: number; msg: string; kind: "ok" | "err" }
 
@@ -1022,6 +1023,18 @@ export default function Page() {
                 </button>
               </div>
 
+              {/* More Games arcade banner */}
+              <button onClick={() => { setScreen("moregames"); soundEngine.playTap(640); }}
+                className="w-full rounded-3xl p-4 flex items-center gap-3 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5"
+                style={{ background: "linear-gradient(120deg,#FF4B6E,#A560E8 55%,#1CB0F6)", color: "#fff", border: "2px solid rgba(255,255,255,0.35)", boxShadow: "var(--shadow-card)" }}>
+                <span className="text-[34px] leading-none shrink-0" aria-hidden>🎮</span>
+                <span className="flex-1 min-w-0">
+                  <span className="font-display font-bold text-xl block leading-tight">More Games <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md align-middle" style={{ background: "#fff", color: "#D33131" }}>NEW</span></span>
+                  <span className="text-xs font-bold block" style={{ color: "rgba(255,255,255,0.9)" }}>Snake, 2048, Flappy Bird &amp; 20 more mini-games — play instantly!</span>
+                </span>
+                <span className="btn-game px-4 py-2.5 shrink-0 text-sm" style={{ background: "#fff", color: "#7B2CBF", boxShadow: "0 4px 0 rgba(0,0,0,.25)" }}>Play</span>
+              </button>
+
               {/* bots preview strip */}
               <div className="card-game p-3.5">
                 <div className="flex items-center justify-between mb-2">
@@ -1081,6 +1094,7 @@ export default function Page() {
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {[
                   { label: "Shop", icon: ShoppingBag, color: "#A560E8", go: () => setScreen("shop") },
+                  { label: "More Games", icon: Gamepad2, color: "#FF4B6E", go: () => setScreen("moregames") },
                   { label: "Friends", icon: UserPlus, color: "#58CC02", go: () => setScreen("friends") },
                   { label: "Replays", icon: History, color: "#7B5CFF", go: () => setScreen("history") },
                   { label: "Rankings", icon: Trophy, color: "#E0A800", go: () => setScreen("rank") },
@@ -1172,6 +1186,10 @@ export default function Page() {
 
       {screen === "tournaments" && (
         <Tournament me={me} token={token} onBack={() => setScreen("home")} showToast={showToast} onRefresh={refreshState} />
+      )}
+
+      {screen === "moregames" && (
+        <MoreGames onBack={() => setScreen("home")} />
       )}
 
       {showPlaySheet && (
