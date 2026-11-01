@@ -83,7 +83,7 @@ function skyAt(meters: number): { top: string; bottom: string; starAlpha: number
 export default function SkyHopper({ onBack }: { onBack: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const engineRef = useRef<Engine>(freshEngine(360));
+  const engineRef = useRef<Engine>(freshEngine(typeof window !== "undefined" ? window.innerWidth : 360));
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(() => getBest("hopper"));
   const [phase, setPhase] = useState<"ready" | "playing" | "over">("ready");
@@ -124,8 +124,8 @@ export default function SkyHopper({ onBack }: { onBack: () => void }) {
       const wrap = wrapRef.current;
       if (!wrap) return;
       const rect = wrap.getBoundingClientRect();
-      W = Math.max(260, Math.min(Math.floor(rect.width), Math.floor(rect.height * 0.64), 460));
-      H = Math.floor(W / 0.64);
+      W = Math.max(240, Math.floor(rect.width));
+      H = Math.max(300, Math.floor(rect.height));
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = W * dpr;
       canvas.height = H * dpr;
@@ -137,7 +137,8 @@ export default function SkyHopper({ onBack }: { onBack: () => void }) {
     const ro = new ResizeObserver(resize);
     if (wrapRef.current) ro.observe(wrapRef.current);
 
-    const u = () => W / 420;
+    // Scale unit follows the stage HEIGHT so jump physics feel the same everywhere.
+    const u = () => Math.max(0.8, Math.min(1.7, H / 640));
     const PR = () => 21 * u(); // player radius
     const PLAT_H = () => 14 * u();
     const meters = (e: Engine) => Math.max(0, Math.floor(e.maxHeight / (46 * u())));
@@ -407,7 +408,7 @@ export default function SkyHopper({ onBack }: { onBack: () => void }) {
       if (e.state === "playing" || e.state === "dead") {
         // horizontal
         const ACC = 2600 * u();
-        const MAXV = 330 * u();
+        const MAXV = Math.max(330 * u(), W * 0.52);
         if (e.state === "playing") {
           if (e.keys.left) e.vx -= ACC * dt;
           if (e.keys.right) e.vx += ACC * dt;

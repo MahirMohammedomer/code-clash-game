@@ -3,7 +3,9 @@
  * best scores + play counts, stored per game on the device.
  */
 
-export type ArcadeGameId = "g2048" | "snake" | "flappy" | "gems" | "breakout" | "hopper";
+export type ArcadeGameId =
+  | "g2048" | "snake" | "flappy" | "gems" | "breakout" | "hopper"
+  | "dino" | "defender" | "mole" | "mines" | "connect4" | "blackjack";
 
 const bestKey = (id: ArcadeGameId) => `arcade_best_${id}`;
 const playsKey = (id: ArcadeGameId) => `arcade_plays_${id}`;

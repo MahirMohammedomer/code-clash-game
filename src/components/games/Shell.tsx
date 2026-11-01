@@ -1,21 +1,22 @@
 "use client";
 
 /**
- * Shared chrome for the premium arcade remakes:
- * branded header with a big friendly BACK button (returns to the arcade),
- * live score + best, sound toggle, restart — and a reusable game-over card.
- * All six rebuilt games use it so the experience feels like one product.
+ * Shared chrome for the premium arcade remakes — ONE theme everywhere:
+ * deep-navy arcade shell, a big unmissable BACK pill pinned in the header
+ * (always visible, safe-area aware, Escape key works too), live score +
+ * best, sound toggle, restart, and a reusable game-over card.
+ * Uses 100dvh so the header can never hide under mobile browser chrome.
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ArrowLeft, RotateCcw, Trophy, Volume2, VolumeX } from "lucide-react";
 import { arcadeMuted, setArcadeMuted, sfx } from "@/lib/arcade-sound";
 import "./games.css";
 
-const headerBtn: React.CSSProperties = {
-  background: "rgba(255,255,255,0.10)",
+const iconBtn: React.CSSProperties = {
+  background: "rgba(255,255,255,0.09)",
   color: "#fff",
-  border: "2px solid rgba(255,255,255,0.25)",
+  border: "2px solid rgba(255,255,255,0.20)",
   boxShadow: "0 3px 0 rgba(0,0,0,0.35)",
 };
 
@@ -26,6 +27,7 @@ export function ArcadeShell({
   score,
   scoreLabel = "Score",
   best,
+  bestOverride,
   onBack,
   onRestart,
   children,
@@ -37,6 +39,8 @@ export function ArcadeShell({
   score: number;
   scoreLabel?: string;
   best: number;
+  /** Pre-formatted best value (e.g. a best time) — shown instead of max(best, score). */
+  bestOverride?: string;
   onBack: () => void;
   onRestart: () => void;
   children: React.ReactNode;
@@ -44,30 +48,56 @@ export function ArcadeShell({
 }) {
   const [isMuted, setIsMuted] = useState(arcadeMuted());
 
+  // Lock page scroll while a game is open, and let Escape act as "back".
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onBack();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onBack]);
+
   return (
-    <div className="fixed inset-0 z-[85] flex flex-col animate-fade select-none" style={{ background: "#14152B" }}>
-      {/* header */}
+    <div
+      className="fixed inset-0 z-[85] flex flex-col animate-fade select-none"
+      style={{ background: "#14152B", height: "100dvh" }}
+    >
+      {/* header — always on top, safe-area padded */}
       <div
-        className="flex items-center gap-2 px-3 py-2.5 shrink-0"
-        style={{ background: "rgba(255,255,255,0.06)", borderBottom: "2px solid rgba(255,255,255,0.12)" }}
+        className="relative z-40 flex items-center gap-2 px-3 shrink-0"
+        style={{
+          background: "rgba(20,21,43,0.96)",
+          borderBottom: "2px solid rgba(255,255,255,0.12)",
+          paddingTop: "max(8px, env(safe-area-inset-top))",
+          paddingBottom: 8,
+        }}
       >
         <button
           onClick={() => {
             sfx.click();
             onBack();
           }}
-          className="btn-game h-10 px-3 !rounded-xl flex items-center gap-1.5 shrink-0"
-          style={headerBtn}
-          aria-label="Back to Cipher Clash arcade"
+          className="btn-game h-11 pl-3 pr-4 !rounded-2xl flex items-center gap-1 shrink-0 text-white"
+          style={{
+            background: "linear-gradient(120deg,#FF4B6E,#FF7A18)",
+            border: "2px solid rgba(255,255,255,0.45)",
+            boxShadow: "0 4px 0 rgba(0,0,0,0.4), 0 6px 18px rgba(255,75,110,0.45)",
+          }}
+          aria-label="Back to games"
         >
-          <ArrowLeft size={18} strokeWidth={3} />
-          <span className="text-sm font-black">Back</span>
+          <ArrowLeft size={21} strokeWidth={3.2} />
+          <span className="text-[15px] font-black tracking-wide">BACK</span>
         </button>
 
         <span className="hidden sm:flex w-10 h-10 rounded-xl items-center justify-center text-[20px] shrink-0" style={{ background: color }} aria-hidden>
           {emoji}
         </span>
-        <div className="min-w-0 hidden xs:block sm:block">
+        <div className="min-w-0 hidden md:block">
           <p className="font-display font-semibold text-white leading-tight truncate">{title}</p>
           <p className="text-[9px] font-black uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.5)" }}>
             Cipher Clash Arcade
@@ -88,7 +118,7 @@ export function ArcadeShell({
             <Trophy size={9} strokeWidth={3} /> Best
           </p>
           <p className="font-display font-bold text-base leading-none tabular-nums" style={{ color: "#FFE27A" }}>
-            {Math.max(best, score).toLocaleString()}
+            {bestOverride ?? Math.max(best, score).toLocaleString()}
           </p>
         </div>
 
@@ -100,7 +130,7 @@ export function ArcadeShell({
             if (!m) sfx.click();
           }}
           className="btn-game w-10 h-10 !rounded-xl flex items-center justify-center shrink-0"
-          style={headerBtn}
+          style={iconBtn}
           aria-label={isMuted ? "Unmute sounds" : "Mute sounds"}
         >
           {isMuted ? <VolumeX size={17} strokeWidth={2.7} /> : <Volume2 size={17} strokeWidth={2.7} />}
@@ -111,17 +141,21 @@ export function ArcadeShell({
             onRestart();
           }}
           className="btn-game w-10 h-10 !rounded-xl flex items-center justify-center shrink-0"
-          style={headerBtn}
+          style={iconBtn}
           aria-label="Restart game"
         >
           <RotateCcw size={17} strokeWidth={2.7} />
         </button>
       </div>
 
-      {/* play area */}
+      {/* play area — games size themselves to ALL of this space */}
       <div className="flex-1 min-h-0 flex flex-col items-center justify-center relative overflow-hidden">{children}</div>
 
-      {footer && <div className="shrink-0 px-3 pb-3 pt-1">{footer}</div>}
+      {footer && (
+        <div className="shrink-0 px-3 pt-1" style={{ paddingBottom: "max(10px, env(safe-area-inset-bottom))" }}>
+          {footer}
+        </div>
+      )}
     </div>
   );
 }
@@ -146,7 +180,7 @@ export function GameOverCard({
   onBack: () => void;
 }) {
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center p-4" style={{ background: "rgba(16,17,38,0.68)", backdropFilter: "blur(3px)" }}>
+    <div className="absolute inset-0 z-30 flex items-center justify-center p-4" style={{ background: "rgba(16,17,38,0.68)", backdropFilter: "blur(3px)" }}>
       <div className="card-game w-full max-w-xs p-5 text-center animate-pop" style={{ background: "#23243F", borderColor: "rgba(255,255,255,0.18)", color: "#fff" }}>
         <p className="text-4xl mb-1" aria-hidden>{isNewBest ? "🏆" : "🎮"}</p>
         <h3 className="font-display font-bold text-2xl leading-tight">{title}</h3>
@@ -171,8 +205,8 @@ export function GameOverCard({
         </button>
         <button
           onClick={onBack}
-          className="btn-game w-full py-3 mt-2"
-          style={{ background: "rgba(255,255,255,0.10)", color: "#fff", border: "2px solid rgba(255,255,255,0.25)", boxShadow: "0 3px 0 rgba(0,0,0,0.35)" }}
+          className="btn-game w-full py-3 mt-2 text-white"
+          style={{ background: "linear-gradient(120deg,#FF4B6E,#FF7A18)", border: "2px solid rgba(255,255,255,0.35)", boxShadow: "0 3px 0 rgba(0,0,0,0.35)" }}
         >
           ← Back to games
         </button>

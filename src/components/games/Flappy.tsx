@@ -26,16 +26,18 @@ interface Engine {
   clouds: Cloud[];
   popups: Popup[];
   state: "ready" | "playing" | "falling" | "dead";
+  uScale: number;
   flash: number;
   shake: number;
   last: number;
   t: number;
 }
 
+// Physics constants are expressed for a ~620px-tall stage and scaled by U
+// (computed from the live canvas height) so the game feels identical on
+// any screen size — phone, tablet or desktop monitor.
 const GRAV = 1500;
 const FLAP = -430;
-const PIPE_W = 74;
-const GAP = 168;
 
 function freshEngine(): Engine {
   return {
@@ -46,7 +48,7 @@ function freshEngine(): Engine {
       x: Math.random(), y: 0.06 + Math.random() * 0.3, s: 0.5 + Math.random() * 0.9, speed: 6 + i * 2,
     })),
     popups: [],
-    state: "ready", flash: 0, shake: 0, last: 0, t: 0,
+    state: "ready", flash: 0, shake: 0, last: 0, t: 0, uScale: 1,
   };
 }
 
@@ -90,7 +92,7 @@ export default function Flappy({ onBack }: { onBack: () => void }) {
       setPhase("playing");
     }
     if (e.state === "playing") {
-      e.vy = FLAP;
+      e.vy = FLAP * (engineRef.current.uScale ?? 1);
       sfx.flap();
     }
   }, []);
@@ -112,13 +114,20 @@ export default function Flappy({ onBack }: { onBack: () => void }) {
     let raf = 0;
     let W = 360;
     let H = 520;
+    let U = 1; // height scale unit
+    let PIPE_W = 74;
+    let GAP = 168;
 
     const resize = () => {
       const wrap = wrapRef.current;
       if (!wrap) return;
       const rect = wrap.getBoundingClientRect();
-      W = Math.max(260, Math.min(Math.floor(rect.width), 460));
-      H = Math.max(320, Math.floor(rect.height));
+      W = Math.max(240, Math.floor(rect.width));
+      H = Math.max(300, Math.floor(rect.height));
+      U = Math.max(0.78, Math.min(1.7, H / 620));
+      engineRef.current.uScale = U;
+      PIPE_W = 74 * U;
+      GAP = Math.max(126, Math.min(250, 168 * U));
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = W * dpr;
       canvas.height = H * dpr;
@@ -132,13 +141,13 @@ export default function Flappy({ onBack }: { onBack: () => void }) {
 
     const groundH = () => Math.max(52, H * 0.11);
     const birdX = () => W * 0.3;
-    const birdR = () => Math.max(15, W * 0.045);
+    const birdR = () => Math.max(14, 17 * U);
 
     const die = (e: Engine) => {
       e.state = "falling";
       e.flash = 1;
       e.shake = 12;
-      e.vy = Math.min(e.vy, -220);
+      e.vy = Math.min(e.vy, -220 * U);
       sfx.hit();
     };
 
@@ -171,7 +180,7 @@ export default function Flappy({ onBack }: { onBack: () => void }) {
       ctx.fillStyle = grad;
       ctx.strokeStyle = "rgba(20,60,20,0.55)";
       ctx.lineWidth = 2;
-      const lipH = 26;
+      const lipH = 26 * U;
       const lipW = 6;
       if (top) {
         ctx.fillRect(x + 3, y, PIPE_W - 6, h - lipH);
@@ -273,14 +282,14 @@ export default function Flappy({ onBack }: { onBack: () => void }) {
       const floorY = H - gh;
       const bx = birdX();
       const br = birdR();
-      const speed = 168 + Math.min(70, e.score * 2.2);
+      const speed = Math.max(W / 3.6, Math.min(W / 1.8, (168 + Math.min(70, e.score * 2.2)) * U));
 
       // --- update ---
       if (e.state === "ready") {
         e.birdY = 0.45 + Math.sin(e.t * 2.6) * 0.016;
         e.rot = Math.sin(e.t * 2.6) * 0.07;
       } else if (e.state === "playing" || e.state === "falling") {
-        e.vy += GRAV * dt;
+        e.vy += GRAV * U * dt;
         e.birdY += (e.vy * dt) / H;
         e.rot = e.state === "falling"
           ? Math.min(1.5, e.rot + dt * 7)
@@ -291,7 +300,7 @@ export default function Flappy({ onBack }: { onBack: () => void }) {
           e.groundX = (e.groundX + speed * dt) % 48;
           e.spawnIn -= speed * dt;
           if (e.spawnIn <= 0) {
-            e.spawnIn = PIPE_W + 190;
+            e.spawnIn = PIPE_W + 205 * U;
             const margin = 66;
             const gapY = margin + Math.random() * Math.max(40, floorY - GAP - margin * 1.5);
             e.pipes.push({ x: W + 10, gapY, passed: false });
@@ -395,7 +404,7 @@ export default function Flappy({ onBack }: { onBack: () => void }) {
 
       // big score while playing
       if (e.state === "playing" || e.state === "falling") {
-        ctx.font = "800 44px 'Fredoka', system-ui, sans-serif";
+        ctx.font = `800 ${Math.round(44 * U)}px 'Fredoka', system-ui, sans-serif`;
         ctx.textAlign = "center";
         ctx.lineWidth = 7;
         ctx.strokeStyle = "rgba(31,36,48,0.75)";
@@ -406,7 +415,7 @@ export default function Flappy({ onBack }: { onBack: () => void }) {
 
       for (const p of e.popups) {
         ctx.globalAlpha = 1 - p.life / 0.8;
-        ctx.font = "800 20px 'Fredoka', system-ui, sans-serif";
+        ctx.font = `800 ${Math.round(20 * U)}px 'Fredoka', system-ui, sans-serif`;
         ctx.textAlign = "center";
         ctx.lineWidth = 4;
         ctx.strokeStyle = "rgba(31,36,48,0.6)";
