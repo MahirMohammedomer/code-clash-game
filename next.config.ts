@@ -13,7 +13,6 @@ const nextConfig: NextConfig = {
     ];
     return [
       { source: "/arcade/:path*", headers: longCache },
-      { source: "/games/:path*", headers: longCache },
       { source: "/icon-:size.png", headers: longCache },
     ];
   },

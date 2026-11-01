@@ -5,7 +5,7 @@
      cache-first — after the first play they load instantly, fully offline.
    - APIs: network only (never serve stale game data).
    Bump VERSION to ship updates. */
-const VERSION = "cipher-clash-v8";
+const VERSION = "cipher-clash-v9";
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 
@@ -81,7 +81,6 @@ self.addEventListener("fetch", (event) => {
   // Bundled arcade games + thumbnails + build assets + fonts/icons:
   // cache-first (immutable within a version; VERSION bumps flush them).
   if (
-    url.pathname.startsWith("/games/") ||
     url.pathname.startsWith("/arcade/") ||
     url.pathname.startsWith("/_next/static/") ||
     /\.(png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf|otf|mp3|wav|ogg)$/.test(url.pathname)

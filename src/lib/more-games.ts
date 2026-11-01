@@ -1,9 +1,9 @@
 /**
  * Catalog for the "More Games" arcade.
  * Community open-source mini-games live as static files under
- * /public/games/<slug>/ (each with its own README/attribution); our own
+ * All 23 entries are original in-app builds; the typed `native` id links
  * premium remakes are native components. Everything runs fully offline
- * once loaded, and keyboard-only classics get an on-screen touch pad.
+ * once loaded.
  */
 
 export type MoreGameCategory = "Arcade" | "Puzzle" | "Cards & Board" | "Classics";
@@ -21,12 +21,8 @@ export interface MoreGame {
   native?:
     | "g2048" | "snake" | "flappy" | "gems" | "breakout" | "hopper"
     | "dino" | "defender" | "mole" | "mines" | "connect4" | "blackjack"
-    | "pong" | "dash" | "wordle" | "sudoku" | "slide" | "rps";
-  /**
-   * On-screen touch gamepad for keyboard-only iframe games:
-   * "arrows" = D-pad + Space/Enter, "dual" = two mini-pads for 2 players.
-   */
-  pad?: "arrows" | "dual";
+    | "pong" | "dash" | "wordle" | "sudoku" | "slide" | "rps"
+    | "duel" | "defense" | "jigsaw" | "cards" | "keys";
   /** Illustrated thumbnail under /public/arcade/. */
   thumb?: string;
   /** Shown big in the "Featured Remakes" rail. */
@@ -50,19 +46,19 @@ export const MORE_GAMES: MoreGame[] = [
   { slug: "dino-run", title: "Dino Dash", emoji: "🦖", color: "linear-gradient(135deg,#8A97AD,#5B6ABF)", category: "Arcade", blurb: "REMAKE ★ Endless desert sprint — leap cacti, duck pterodactyls!", controls: "both", native: "dino", thumb: "/arcade/dino.jpg", featured: true },
   { slug: "breakout", title: "Neon Breakout", emoji: "🧱", color: "linear-gradient(135deg,#FF7A18,#FF4B4B)", category: "Arcade", blurb: "REMAKE ★ Brick-smashing with levels, power-ups & multi-ball!", controls: "both", native: "breakout", thumb: "/arcade/breakout.jpg", featured: true },
   { slug: "space-invaders", title: "Star Defender", emoji: "👾", color: "linear-gradient(135deg,#7B5CFF,#26283B)", category: "Arcade", blurb: "REMAKE ★ Blast alien waves, grab power-ups, hunt the mothership!", controls: "both", native: "defender", thumb: "/arcade/defender.jpg", featured: true },
-  { slug: "fighting-game", title: "Samurai Fighting", emoji: "🥋", color: "linear-gradient(135deg,#E85D04,#9D0208)", category: "Arcade", blurb: "2-player sword fighting — on-screen pads included for phones!", controls: "keyboard", pad: "dual" },
-  { slug: "tower-defense", title: "Tower Defense", emoji: "🏰", color: "linear-gradient(135deg,#1899D6,#0B5FFF)", category: "Arcade", blurb: "Build towers and stop the enemy waves.", controls: "both" },
+  { slug: "fighting-game", title: "Samurai Duel", emoji: "🥋", color: "linear-gradient(135deg,#E85D04,#9D0208)", category: "Arcade", blurb: "REMAKE ★ Sword-fight the CPU or a friend on one screen — best of 3!", controls: "both", native: "duel", thumb: "/arcade/duel.jpg", featured: true },
+  { slug: "tower-defense", title: "Castle Defense", emoji: "🏰", color: "linear-gradient(135deg,#1899D6,#0B5FFF)", category: "Arcade", blurb: "REMAKE ★ Build & upgrade towers, survive endless monster waves!", controls: "both", native: "defense", thumb: "/arcade/defense.jpg", featured: true },
   { slug: "whac-a-mole", title: "Mole Mania", emoji: "🔨", color: "linear-gradient(135deg,#B0703C,#7C4A21)", category: "Arcade", blurb: "REMAKE ★ 45-second bonk frenzy — combos, golden moles, bombs!", controls: "both", native: "mole", thumb: "/arcade/mole.jpg", featured: true },
   { slug: "dash", title: "Turbo Dash", emoji: "🏎️", color: "linear-gradient(135deg,#14D4C5,#0E7C66)", category: "Arcade", blurb: "REMAKE ★ Swipe between lanes, dodge traffic, chase near-misses!", controls: "both", native: "dash", thumb: "/arcade/dash.jpg", featured: true },
   { slug: "wordle", title: "Word Quest", emoji: "🟩", color: "linear-gradient(135deg,#58CC02,#B8A11A)", category: "Puzzle", blurb: "REMAKE ★ Daily word + endless mode — 6 tries, on-screen keyboard!", controls: "both", native: "wordle", thumb: "/arcade/word.jpg", featured: true },
   { slug: "minesweeper", title: "Mine Sweeper", emoji: "💣", color: "linear-gradient(135deg,#5B8DEF,#8A97AD)", category: "Puzzle", blurb: "REMAKE ★ The classic, perfected — safe first tap, flags, best times.", controls: "both", native: "mines", thumb: "/arcade/mines.jpg", featured: true },
   { slug: "sudoku", title: "Sudoku Master", emoji: "🧮", color: "linear-gradient(135deg,#4C6FFF,#1CB0F6)", category: "Puzzle", blurb: "REMAKE ★ Fresh unique puzzles, pencil notes, hints & best times!", controls: "both", native: "sudoku", thumb: "/arcade/sudoku.jpg", featured: true },
-  { slug: "puzzle-game", title: "Jigsaw Puzzle", emoji: "🧩", color: "linear-gradient(135deg,#A560E8,#FF4B6E)", category: "Puzzle", blurb: "Drag the pieces to rebuild the picture.", controls: "touch" },
+  { slug: "puzzle-game", title: "Jigsaw Joy", emoji: "🧩", color: "linear-gradient(135deg,#A560E8,#FF4B6E)", category: "Puzzle", blurb: "REMAKE ★ Drag & snap 12–48 pieces — race your best time!", controls: "both", native: "jigsaw", thumb: "/arcade/jigsaw.jpg", featured: true },
   { slug: "slide-puzzle", title: "Slide Puzzle", emoji: "🧩", color: "linear-gradient(135deg,#F59E0B,#EF4444)", category: "Puzzle", blurb: "REMAKE ★ Picture & number modes, 3×3 to 5×5 — fewest moves wins!", controls: "both", native: "slide", thumb: "/arcade/slide.jpg", featured: true },
   { slug: "blackjack", title: "Blackjack 21", emoji: "🃏", color: "linear-gradient(135deg,#0E7C66,#14532D)", category: "Cards & Board", blurb: "REMAKE ★ Real casino flow — chips, doubles, 3:2 payouts, bankroll!", controls: "both", native: "blackjack", thumb: "/arcade/blackjack.jpg", featured: true },
-  { slug: "pokemon-cards", title: "Pokémon Cards", emoji: "⚡", color: "linear-gradient(135deg,#FFC800,#FF4B4B)", category: "Cards & Board", blurb: "Draw a random classic trading card. What will you get?", controls: "touch" },
+  { slug: "creature-cards", title: "Creature Cards", emoji: "🃏", color: "linear-gradient(135deg,#FFC800,#FF4B4B)", category: "Cards & Board", blurb: "REMAKE ★ Open packs, collect all 28 elemental creatures!", controls: "both", native: "cards", thumb: "/arcade/cards.jpg", featured: true },
   { slug: "connect4", title: "Connect Four", emoji: "🔴", color: "linear-gradient(135deg,#FF4B4B,#1CB0F6)", category: "Cards & Board", blurb: "REMAKE ★ Outsmart the CPU (3 brains) or duel a friend!", controls: "both", native: "connect4", thumb: "/arcade/connect4.jpg", featured: true },
   { slug: "rock-paper-scissors", title: "Rock Paper Scissors", emoji: "✊", color: "linear-gradient(135deg,#FF9600,#FF4B6E)", category: "Cards & Board", blurb: "REMAKE ★ First-to-5 matches vs a CPU that learns your patterns!", controls: "both", native: "rps", thumb: "/arcade/rps.jpg", featured: true },
   { slug: "pong", title: "Neon Pong", emoji: "🏓", color: "linear-gradient(135deg,#334155,#0F172A)", category: "Classics", blurb: "REMAKE ★ Drag your paddle vs CPU — or 2 players on one screen!", controls: "both", native: "pong", thumb: "/arcade/pong.jpg", featured: true },
-  { slug: "key-codes", title: "Key Tester", emoji: "⌨️", color: "linear-gradient(135deg,#64748B,#334155)", category: "Classics", blurb: "Press any key to reveal its secret code.", controls: "keyboard" },
+  { slug: "key-codes", title: "Key Tester", emoji: "⌨️", color: "linear-gradient(135deg,#64748B,#334155)", category: "Classics", blurb: "REMAKE ★ Reveal every key's secret code — tappable keyboard included!", controls: "both", native: "keys", thumb: "/arcade/keys.jpg", featured: true },
 ];
