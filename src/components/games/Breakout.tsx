@@ -34,6 +34,7 @@ interface Engine {
   combo: number;
   bestCombo: number;
   bricksBroken: number;
+  cols: number;
   state: "ready" | "playing" | "levelclear" | "over";
   bannerUntil: number;
   shake: number;
@@ -41,6 +42,8 @@ interface Engine {
 }
 
 const COLS = 9;
+/** Brick columns adapt to the stage width so the game fills any screen. */
+const colsForWidth = (w: number) => Math.max(7, Math.min(14, Math.round(w / 62)));
 const ROW_PALETTE = ["#FF4B6E", "#FF8A3D", "#FFC800", "#58CC02", "#1CB0F6", "#A560E8", "#FF6BCB", "#2EE6A8"];
 const POWER_ART: Record<PowerUp["type"], { label: string; color: string }> = {
   wide: { label: "W", color: "#1CB0F6" },
@@ -49,7 +52,7 @@ const POWER_ART: Record<PowerUp["type"], { label: string; color: string }> = {
   life: { label: "♥", color: "#FF4B6E" },
 };
 
-function makeLevel(level: number): Brick[] {
+function makeLevel(level: number, cols: number = COLS): Brick[] {
   const bricks: Brick[] = [];
   const pattern = (level - 1) % 6;
   const cycle = Math.floor((level - 1) / 6);
@@ -57,31 +60,31 @@ function makeLevel(level: number): Brick[] {
     bricks.push({ col, row, hp: hp + (cycle > 0 && row === 0 ? 1 : 0), maxHp: hp, alive: true, hue: ROW_PALETTE[row % ROW_PALETTE.length] });
 
   if (pattern === 0) {
-    for (let r = 0; r < 5; r++) for (let c = 0; c < COLS; c++) add(c, r, 1);
+    for (let r = 0; r < 5; r++) for (let c = 0; c < cols; c++) add(c, r, 1);
   } else if (pattern === 1) {
     for (let r = 0; r < 6; r++)
-      for (let c = 0; c < COLS; c++) {
+      for (let c = 0; c < cols; c++) {
         if (r === 2) add(c, r, 2);
         else if ((r + c) % 2 === 0) add(c, r, 1);
       }
   } else if (pattern === 2) {
     for (let r = 0; r < 5; r++)
-      for (let c = r; c < COLS - r; c++) add(c, r, r === 0 ? 2 : 1);
+      for (let c = r; c < cols - r; c++) add(c, r, r === 0 ? 2 : 1);
   } else if (pattern === 3) {
     for (let r = 0; r < 5; r++)
-      for (let c = 0; c < COLS; c++) {
-        const border = r === 0 || r === 4 || c === 0 || c === COLS - 1;
+      for (let c = 0; c < cols; c++) {
+        const border = r === 0 || r === 4 || c === 0 || c === cols - 1;
         add(c, r, border ? 2 : 1);
       }
   } else if (pattern === 4) {
     for (let r = 0; r < 6; r++)
-      for (let c = 0; c < COLS; c++) {
+      for (let c = 0; c < cols; c++) {
         if (c % 2 === 0) add(c, r, r % 3 === 0 ? 2 : 1);
         else if (r === 5) add(c, r, 1);
       }
   } else {
     for (let r = 0; r < 6; r++)
-      for (let c = 0; c < COLS; c++) {
+      for (let c = 0; c < cols; c++) {
         if ((c + r * 2) % 7 !== 3) add(c, r, r < 2 ? 2 : 1);
       }
   }
@@ -89,12 +92,12 @@ function makeLevel(level: number): Brick[] {
   return bricks;
 }
 
-function freshEngine(): Engine {
+function freshEngine(cols: number = COLS): Engine {
   return {
     paddleX: 0.5, paddleTarget: null, keys: { left: false, right: false },
     wideUntil: 0, slowUntil: 0,
     balls: [{ x: 0.5, y: 0, vx: 0, vy: 0, stuck: true, trail: [] }],
-    bricks: makeLevel(1), powerups: [], particles: [], floaters: [],
+    bricks: makeLevel(1, cols), powerups: [], particles: [], floaters: [], cols,
     lives: 3, level: 1, score: 0, combo: 0, bestCombo: 0, bricksBroken: 0,
     state: "ready", bannerUntil: 0, shake: 0, last: 0,
   };
@@ -103,13 +106,13 @@ function freshEngine(): Engine {
 export default function Breakout({ onBack }: { onBack: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const engineRef = useRef<Engine>(freshEngine());
+  const engineRef = useRef<Engine>(freshEngine(colsForWidth(typeof window !== "undefined" ? window.innerWidth : 420)));
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(() => getBest("breakout"));
   const [over, setOver] = useState<{ best: number; isNewBest: boolean; level: number; bricks: number; bestCombo: number } | null>(null);
 
   const restart = useCallback(() => {
-    engineRef.current = freshEngine();
+    engineRef.current = freshEngine(colsForWidth(wrapRef.current?.getBoundingClientRect().width ?? window.innerWidth));
     setScore(0);
     setOver(null);
   }, []);
@@ -129,8 +132,8 @@ export default function Breakout({ onBack }: { onBack: () => void }) {
       const wrap = wrapRef.current;
       if (!wrap) return;
       const rect = wrap.getBoundingClientRect();
-      W = Math.max(260, Math.min(Math.floor(rect.width), Math.floor(rect.height * 0.66), 470));
-      H = Math.floor(W / 0.66);
+      W = Math.max(240, Math.floor(rect.width));
+      H = Math.max(300, Math.floor(rect.height));
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = W * dpr;
       canvas.height = H * dpr;
@@ -142,13 +145,14 @@ export default function Breakout({ onBack }: { onBack: () => void }) {
     const ro = new ResizeObserver(resize);
     if (wrapRef.current) ro.observe(wrapRef.current);
 
-    const u = () => W / 420; // scale unit
+    // Scale unit follows the average stage size so speeds/sizes feel right on any screen.
+    const u = () => Math.max(0.75, Math.min(1.8, (W + H) / 2 / 560));
     const paddleY = () => H - 44 * u();
-    const paddleW = (e: Engine, now: number) => (now < e.wideUntil ? 132 : 86) * u();
+    const paddleW = (e: Engine, now: number) => (now < e.wideUntil ? 150 : 100) * u();
     const paddleH = () => 14 * u();
     const ballR = () => 7.5 * u();
-    const brickGeom = (b: Brick) => {
-      const bw = W / COLS;
+    const brickGeom = (b: Brick, cols: number) => {
+      const bw = W / cols;
       const bh = 21 * u();
       const top = 64 * u();
       return { x: b.col * bw + 2, y: top + b.row * (bh + 4 * u()), w: bw - 4, h: bh };
@@ -217,7 +221,7 @@ export default function Breakout({ onBack }: { onBack: () => void }) {
 
     const nextLevel = (e: Engine, now: number) => {
       e.level++;
-      e.bricks = makeLevel(e.level);
+      e.bricks = makeLevel(e.level, e.cols);
       e.balls = [{ x: e.paddleX * W, y: 0, vx: 0, vy: 0, stuck: true, trail: [] }];
       e.powerups = [];
       e.combo = 0;
@@ -281,7 +285,7 @@ export default function Breakout({ onBack }: { onBack: () => void }) {
       // bricks
       for (const b of e.bricks) {
         if (!b.alive) continue;
-        const g = brickGeom(b);
+        const g = brickGeom(b, e.cols);
         const cx = Math.max(g.x, Math.min(ball.x, g.x + g.w));
         const cy = Math.max(g.y, Math.min(ball.y, g.y + g.h));
         const dx = ball.x - cx;
@@ -431,7 +435,7 @@ export default function Breakout({ onBack }: { onBack: () => void }) {
       // bricks
       for (const b of e.bricks) {
         if (!b.alive) continue;
-        const g = brickGeom(b);
+        const g = brickGeom(b, e.cols);
         const grad = ctx.createLinearGradient(g.x, g.y, g.x, g.y + g.h);
         grad.addColorStop(0, b.hue);
         grad.addColorStop(1, b.hue);

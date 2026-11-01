@@ -278,7 +278,7 @@ export default function G2048({ onBack }: { onBack: () => void }) {
       onBack={back}
       onRestart={newGame}
       footer={
-        <div className="max-w-[430px] mx-auto flex items-center gap-2">
+        <div className="max-w-[620px] mx-auto flex items-center gap-2">
           <button
             onClick={undo}
             disabled={!canUndo}
@@ -299,7 +299,7 @@ export default function G2048({ onBack }: { onBack: () => void }) {
       <div
         className="relative rounded-3xl touch-none"
         style={{
-          width: "min(92vw, 430px, 58vh)",
+          width: "min(94vw, 620px, calc(100dvh - 235px))",
           aspectRatio: "1",
           background: "linear-gradient(160deg,#3A3B5C,#26283B)",
           border: "2px solid rgba(255,255,255,0.14)",
@@ -336,7 +336,7 @@ export default function G2048({ onBack }: { onBack: () => void }) {
                 style={{
                   background: col.bg,
                   color: col.fg,
-                  fontSize: digits <= 2 ? "clamp(26px,8vw,42px)" : digits === 3 ? "clamp(21px,6.5vw,34px)" : "clamp(17px,5.2vw,27px)",
+                  fontSize: digits <= 2 ? "clamp(26px,8vw,58px)" : digits === 3 ? "clamp(21px,6.5vw,46px)" : "clamp(17px,5.2vw,37px)",
                   boxShadow: col.glow ? "0 4px 14px rgba(255,190,0,0.45), 0 3px 0 rgba(0,0,0,0.25)" : "0 3px 0 rgba(0,0,0,0.22)",
                   textShadow: col.fg === "#fff" ? "0 1px 2px rgba(0,0,0,0.25)" : "none",
                 }}

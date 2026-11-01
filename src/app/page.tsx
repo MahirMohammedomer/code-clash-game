@@ -1029,8 +1029,8 @@ export default function Page() {
                 style={{ background: "linear-gradient(120deg,#FF4B6E,#A560E8 55%,#1CB0F6)", color: "#fff", border: "2px solid rgba(255,255,255,0.35)", boxShadow: "var(--shadow-card)" }}>
                 <span className="text-[34px] leading-none shrink-0" aria-hidden>🎮</span>
                 <span className="flex-1 min-w-0">
-                  <span className="font-display font-bold text-xl block leading-tight">More Games <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md align-middle" style={{ background: "#fff", color: "#D33131" }}>★ 6 REMAKES</span></span>
-                  <span className="text-xs font-bold block" style={{ color: "rgba(255,255,255,0.9)" }}>2048, Snake, Flappy Wings &amp; Gem Crush rebuilt — plus 17 more games!</span>
+                  <span className="font-display font-bold text-xl block leading-tight">More Games <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md align-middle" style={{ background: "#fff", color: "#D33131" }}>★ 12 REMAKES</span></span>
+                  <span className="text-xs font-bold block" style={{ color: "rgba(255,255,255,0.9)" }}>2048, Snake, Blackjack, Dino Dash &amp; 8 more rebuilt fullscreen — plus 11 classics!</span>
                 </span>
                 <span className="btn-game px-4 py-2.5 shrink-0 text-sm" style={{ background: "#fff", color: "#7B2CBF", boxShadow: "0 4px 0 rgba(0,0,0,.25)" }}>Play</span>
               </button>

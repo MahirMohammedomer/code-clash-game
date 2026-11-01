@@ -12,11 +12,18 @@ import { ArcadeShell, GameOverCard, StartHint } from "./Shell";
 import { bumpPlays, getBest, submitScore } from "@/lib/arcade";
 import { sfx } from "@/lib/arcade-sound";
 
-const GRID = 21;
+/** The board reshapes itself to the screen: ~26px cells, clamped to sane bounds. */
+function gridForSize(w: number, h: number): { cols: number; rows: number } {
+  const cols = Math.max(15, Math.min(38, Math.floor(w / 26)));
+  const rows = Math.max(15, Math.min(38, Math.floor(h / 26)));
+  return { cols, rows };
+}
 type Pt = { x: number; y: number };
 type Particle = { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number };
 
 interface Engine {
+  cols: number;
+  rows: number;
   snake: Pt[];
   prev: Pt[];
   dir: Pt;
@@ -34,25 +41,29 @@ interface Engine {
   particles: Particle[];
 }
 
-function randomCell(snake: Pt[], extra: Pt[]): Pt {
+function randomCell(snake: Pt[], extra: Pt[], cols: number, rows: number): Pt {
   for (;;) {
-    const p = { x: Math.floor(Math.random() * GRID), y: Math.floor(Math.random() * GRID) };
+    const p = { x: Math.floor(Math.random() * cols), y: Math.floor(Math.random() * rows) };
     if (!snake.some((s) => s.x === p.x && s.y === p.y) && !extra.some((s) => s.x === p.x && s.y === p.y)) return p;
   }
 }
 
-function freshEngine(): Engine {
+function freshEngine(cols = 21, rows = 21): Engine {
+  const cy = Math.floor(rows / 2);
+  const hx = Math.floor(cols / 2);
   const snake = [
-    { x: 10, y: 10 },
-    { x: 9, y: 10 },
-    { x: 8, y: 10 },
+    { x: hx, y: cy },
+    { x: hx - 1, y: cy },
+    { x: hx - 2, y: cy },
   ];
   return {
+    cols,
+    rows,
     snake,
     prev: snake.map((p) => ({ ...p })),
     dir: { x: 1, y: 0 },
     queue: [],
-    food: randomCell(snake, []),
+    food: randomCell(snake, [], cols, rows),
     golden: null,
     foodCount: 0,
     score: 0,
@@ -69,7 +80,20 @@ function freshEngine(): Engine {
 export default function Snake({ onBack }: { onBack: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const engineRef = useRef<Engine>(freshEngine());
+  const engineRef = useRef<Engine>(
+    (() => {
+      const { cols, rows } = gridForSize(
+        typeof window !== "undefined" ? window.innerWidth : 390,
+        typeof window !== "undefined" ? window.innerHeight - 120 : 640
+      );
+      return freshEngine(cols, rows);
+    })()
+  );
+  const [isTouch, setIsTouch] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time environment probe
+    setIsTouch(window.matchMedia?.("(pointer: coarse)").matches ?? false);
+  }, []);
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(() => getBest("snake"));
   const [phase, setPhase] = useState<"ready" | "playing" | "over">("ready");
@@ -80,7 +104,9 @@ export default function Snake({ onBack }: { onBack: () => void }) {
   }, [phase]);
 
   const restart = useCallback(() => {
-    engineRef.current = freshEngine();
+    const rect = wrapRef.current?.getBoundingClientRect();
+    const { cols, rows } = rect ? gridForSize(rect.width, rect.height) : { cols: 21, rows: 21 };
+    engineRef.current = freshEngine(cols, rows);
     setScore(0);
     setOverInfo(null);
     setPhase("ready");
@@ -134,18 +160,22 @@ export default function Snake({ onBack }: { onBack: () => void }) {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
     let raf = 0;
-    let size = 300;
+    let cw = 300;
+    let ch = 300;
 
     const resize = () => {
       const wrap = wrapRef.current;
       if (!wrap) return;
       const rect = wrap.getBoundingClientRect();
-      size = Math.max(200, Math.floor(Math.min(rect.width, rect.height)));
+      const e = engineRef.current;
+      const cell = Math.max(10, Math.floor(Math.min(rect.width / e.cols, rect.height / e.rows)));
+      cw = cell * e.cols;
+      ch = cell * e.rows;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
-      canvas.width = size * dpr;
-      canvas.height = size * dpr;
-      canvas.style.width = `${size}px`;
-      canvas.style.height = `${size}px`;
+      canvas.width = cw * dpr;
+      canvas.height = ch * dpr;
+      canvas.style.width = `${cw}px`;
+      canvas.style.height = `${ch}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
     resize();
@@ -169,7 +199,7 @@ export default function Snake({ onBack }: { onBack: () => void }) {
       if (e.queue.length > 0) e.dir = e.queue.shift()!;
       const head = { x: e.snake[0].x + e.dir.x, y: e.snake[0].y + e.dir.y };
 
-      const hitWall = head.x < 0 || head.y < 0 || head.x >= GRID || head.y >= GRID;
+      const hitWall = head.x < 0 || head.y < 0 || head.x >= e.cols || head.y >= e.rows;
       const hitSelf = e.snake.some((s, i) => i < e.snake.length - 1 && s.x === head.x && s.y === head.y);
       if (hitWall || hitSelf) {
         e.dead = true;
@@ -195,10 +225,10 @@ export default function Snake({ onBack }: { onBack: () => void }) {
         e.foodCount++;
         burst(e, head.x + 0.5, head.y + 0.5, "#FF4B4B");
         sfx.eat();
-        e.food = randomCell(e.snake, e.golden ? [e.golden] : []);
+        e.food = randomCell(e.snake, e.golden ? [e.golden] : [], e.cols, e.rows);
         e.tickMs = Math.max(68, 150 - e.foodCount * 3);
         if (e.foodCount % 5 === 0 && !e.golden) {
-          const g = randomCell(e.snake, [e.food]);
+          const g = randomCell(e.snake, [e.food], e.cols, e.rows);
           e.golden = { ...g, expires: performance.now() + 6000 };
         }
         setScore(e.score);
@@ -270,8 +300,8 @@ export default function Snake({ onBack }: { onBack: () => void }) {
       }
       if (e.golden && now > e.golden.expires) e.golden = null;
 
-      const cell = size / GRID;
-      ctx.clearRect(0, 0, size, size);
+      const cell = cw / e.cols;
+      ctx.clearRect(0, 0, cw, ch);
 
       ctx.save();
       if (e.shake > 0) {
@@ -282,10 +312,10 @@ export default function Snake({ onBack }: { onBack: () => void }) {
 
       // board
       ctx.fillStyle = "#1B2B22";
-      ctx.fillRect(-20, -20, size + 40, size + 40);
+      ctx.fillRect(-20, -20, cw + 40, ch + 40);
       ctx.fillStyle = "rgba(255,255,255,0.035)";
-      for (let y = 0; y < GRID; y++)
-        for (let x = 0; x < GRID; x++)
+      for (let y = 0; y < e.rows; y++)
+        for (let x = 0; x < e.cols; x++)
           if ((x + y) % 2 === 0) ctx.fillRect(x * cell, y * cell, cell, cell);
 
       drawFood(cell, e.food, false, now, false);
@@ -406,24 +436,6 @@ export default function Snake({ onBack }: { onBack: () => void }) {
       best={best}
       onBack={onBack}
       onRestart={restart}
-      footer={
-        <div className="flex flex-col items-center gap-1.5 sm:hidden">
-          <button className={dBtn} style={dStyle} onPointerDown={() => setDir({ x: 0, y: -1 })} aria-label="Up">
-            <ChevronUp size={28} strokeWidth={3} />
-          </button>
-          <div className="flex gap-14">
-            <button className={dBtn} style={dStyle} onPointerDown={() => setDir({ x: -1, y: 0 })} aria-label="Left">
-              <ChevronLeft size={28} strokeWidth={3} />
-            </button>
-            <button className={dBtn} style={dStyle} onPointerDown={() => setDir({ x: 1, y: 0 })} aria-label="Right">
-              <ChevronRight size={28} strokeWidth={3} />
-            </button>
-          </div>
-          <button className={dBtn} style={dStyle} onPointerDown={() => setDir({ x: 0, y: 1 })} aria-label="Down">
-            <ChevronDown size={28} strokeWidth={3} />
-          </button>
-        </div>
-      }
     >
       <div ref={wrapRef} className="absolute inset-0 flex items-center justify-center" onPointerDown={onPointerDown} onPointerUp={onPointerUp}>
         <canvas
@@ -432,9 +444,29 @@ export default function Snake({ onBack }: { onBack: () => void }) {
           style={{ border: "2px solid rgba(255,255,255,0.14)", boxShadow: "0 18px 40px rgba(0,0,0,0.45)", background: "#1B2B22" }}
         />
       </div>
-      <p className="absolute top-2.5 text-[11px] font-black px-2.5 py-1 rounded-full hidden sm:block" style={{ background: "rgba(0,0,0,0.35)", color: "rgba(255,255,255,0.75)" }}>
+      <p className="absolute top-2.5 text-[11px] font-black px-2.5 py-1 rounded-full hidden sm:block z-10" style={{ background: "rgba(0,0,0,0.35)", color: "rgba(255,255,255,0.75)" }}>
         🍎 +10 · ⭐ golden apple +50 (be quick!) · Swipe or arrow keys
       </p>
+
+      {/* on-screen D-pad (touch devices) — floats over the board */}
+      {isTouch && phase !== "over" && (
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1 opacity-80">
+          <button className={dBtn} style={dStyle} onPointerDown={(ev) => { ev.preventDefault(); setDir({ x: 0, y: -1 }); }} aria-label="Up">
+            <ChevronUp size={26} strokeWidth={3} />
+          </button>
+          <div className="flex gap-12">
+            <button className={dBtn} style={dStyle} onPointerDown={(ev) => { ev.preventDefault(); setDir({ x: -1, y: 0 }); }} aria-label="Left">
+              <ChevronLeft size={26} strokeWidth={3} />
+            </button>
+            <button className={dBtn} style={dStyle} onPointerDown={(ev) => { ev.preventDefault(); setDir({ x: 1, y: 0 }); }} aria-label="Right">
+              <ChevronRight size={26} strokeWidth={3} />
+            </button>
+          </div>
+          <button className={dBtn} style={dStyle} onPointerDown={(ev) => { ev.preventDefault(); setDir({ x: 0, y: 1 }); }} aria-label="Down">
+            <ChevronDown size={26} strokeWidth={3} />
+          </button>
+        </div>
+      )}
 
       {phase === "ready" && <StartHint emoji="🐍" title="Snake" hint="Tap or press an arrow key to start" onStart={start} />}
       {phase === "over" && overInfo && (

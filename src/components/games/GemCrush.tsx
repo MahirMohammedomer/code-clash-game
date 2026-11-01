@@ -449,7 +449,7 @@ export default function GemCrush({ onBack }: { onBack: () => void }) {
       }
     >
       {/* timer + fever bars */}
-      <div className="w-full px-4 pt-3 shrink-0" style={{ maxWidth: 460 }}>
+      <div className="px-1 pt-3 shrink-0" style={{ width: "min(94vw, 620px, calc(100dvh - 295px))" }}>
         <div className="flex items-center gap-2 mb-1.5">
           <span className={`text-sm font-black tabular-nums ${lowTime ? "animate-pulse" : ""}`} style={{ color: lowTime ? "#FF6B6B" : "#fff" }}>
             ⏱️ {Math.ceil(timeLeft)}s
@@ -478,7 +478,7 @@ export default function GemCrush({ onBack }: { onBack: () => void }) {
       <div
         className={`relative rounded-3xl touch-none my-auto ${feverOn ? "fever-glow" : ""}`}
         style={{
-          width: "min(94vw, 440px, 52vh)",
+          width: "min(94vw, 620px, calc(100dvh - 295px))",
           aspectRatio: "1",
           background: feverOn
             ? "linear-gradient(160deg,#4A2B12,#2B1B3D)"
