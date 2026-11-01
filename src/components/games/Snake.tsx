@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 import { ArcadeShell, GameOverCard, StartHint } from "./Shell";
-import { bumpPlays, getBest, submitScore } from "@/lib/arcade";
+import { bumpPlays, getBest, submitScore, arcadeDpr } from "@/lib/arcade";
 import { sfx } from "@/lib/arcade-sound";
 
 /** The board reshapes itself to the screen: ~26px cells, clamped to sane bounds. */
@@ -171,7 +171,7 @@ export default function Snake({ onBack }: { onBack: () => void }) {
       const cell = Math.max(10, Math.floor(Math.min(rect.width / e.cols, rect.height / e.rows)));
       cw = cell * e.cols;
       ch = cell * e.rows;
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = arcadeDpr();
       canvas.width = cw * dpr;
       canvas.height = ch * dpr;
       canvas.style.width = `${cw}px`;

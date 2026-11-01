@@ -10,7 +10,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArcadeShell, GameOverCard, StartHint } from "./Shell";
-import { bumpPlays, getBest, submitScore } from "@/lib/arcade";
+import { bumpPlays, getBest, submitScore, arcadeDpr } from "@/lib/arcade";
 import { sfx } from "@/lib/arcade-sound";
 
 interface Bullet { x: number; y: number; vx: number; vy: number; hostile: boolean }
@@ -127,7 +127,7 @@ export default function StarDefender({ onBack }: { onBack: () => void }) {
       W = Math.max(280, Math.floor(rect.width));
       H = Math.max(320, Math.floor(rect.height));
       U = Math.max(0.75, Math.min(1.6, H / 600));
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = arcadeDpr();
       canvas.width = W * dpr;
       canvas.height = H * dpr;
       canvas.style.width = `${W}px`;

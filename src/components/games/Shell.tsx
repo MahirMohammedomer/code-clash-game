@@ -26,6 +26,7 @@ export function ArcadeShell({
   color,
   score,
   scoreLabel = "Score",
+  scoreDisplay,
   best,
   bestOverride,
   onBack,
@@ -38,6 +39,8 @@ export function ArcadeShell({
   color: string;
   score: number;
   scoreLabel?: string;
+  /** Formatted score (e.g. "1:23") shown instead of the raw number. */
+  scoreDisplay?: string;
   best: number;
   /** Pre-formatted best value (e.g. a best time) — shown instead of max(best, score). */
   bestOverride?: string;
@@ -108,7 +111,7 @@ export function ArcadeShell({
 
         <div className="text-right shrink-0 mr-1">
           <p className="text-[9px] font-black uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.55)" }}>{scoreLabel}</p>
-          <p className="font-display font-bold text-white text-lg leading-none tabular-nums">{score.toLocaleString()}</p>
+          <p className="font-display font-bold text-white text-lg leading-none tabular-nums">{scoreDisplay ?? score.toLocaleString()}</p>
         </div>
         <div
           className="shrink-0 rounded-xl px-2.5 py-1.5 text-right"
@@ -164,7 +167,9 @@ export function GameOverCard({
   title = "Game Over",
   score,
   scoreLabel = "Score",
+  scoreDisplay,
   best,
+  bestDisplay,
   isNewBest,
   extra,
   onRestart,
@@ -173,7 +178,11 @@ export function GameOverCard({
   title?: string;
   score: number;
   scoreLabel?: string;
+  /** Formatted score (e.g. "1:23") shown instead of the raw number. */
+  scoreDisplay?: string;
   best: number;
+  /** Formatted best shown instead of the raw number. */
+  bestDisplay?: string;
   isNewBest: boolean;
   extra?: React.ReactNode;
   onRestart: () => void;
@@ -192,11 +201,11 @@ export function GameOverCard({
         <div className="flex justify-center gap-6 mt-4 mb-1">
           <div>
             <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.55)" }}>{scoreLabel}</p>
-            <p className="font-display font-bold text-3xl tabular-nums">{score.toLocaleString()}</p>
+            <p className="font-display font-bold text-3xl tabular-nums">{scoreDisplay ?? score.toLocaleString()}</p>
           </div>
           <div>
             <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.55)" }}>Best</p>
-            <p className="font-display font-bold text-3xl tabular-nums" style={{ color: "#FFE27A" }}>{best.toLocaleString()}</p>
+            <p className="font-display font-bold text-3xl tabular-nums" style={{ color: "#FFE27A" }}>{bestDisplay ?? best.toLocaleString()}</p>
           </div>
         </div>
         {extra}

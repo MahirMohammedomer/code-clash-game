@@ -32,8 +32,8 @@ import {
 import { historyPayload, saveLocalHistoryEntry } from "@/lib/history";
 import { normalizeAvatar } from "@/lib/avatar";
 import {
-  clearPendingResults, clearSession, lastUsername, loadGuestProfile, loadPendingResults,
-  loadRoomSession, loadSession, makeId, queuePendingResult, saveGuestProfile,
+  clearPendingResults, clearSession, lastUsername, loadCachedProfile, loadGuestProfile, loadPendingResults,
+  loadRoomSession, loadSession, makeId, queuePendingResult, saveCachedProfile, saveGuestProfile,
   saveRoomSession, saveSession, tzEastMinutes, type SessionData,
 } from "@/lib/session";
 import { soundEngine } from "@/lib/sound-effects";
@@ -270,7 +270,15 @@ export default function Page() {
         setScreen("welcome");
         return;
       }
-      // registered
+      // registered — show the cached profile INSTANTLY so launch never waits
+      // on the network; fresh state then loads in the background.
+      const cachedProfile = loadCachedProfile();
+      const showedCached = !!(cachedProfile && cachedProfile.username === s.username);
+      if (showedCached && cachedProfile) {
+        setMe({ ...cachedProfile, avatarConfig: normalizeAvatar(cachedProfile.avatarConfig) });
+        setScreen("home");
+        setRoomResume(loadRoomSession());
+      }
       try {
         const res = await fetch(`/api/state?token=${s.token}&tz=${tzEastMinutes()}`);
         const data = await res.json();
@@ -300,10 +308,14 @@ export default function Page() {
         if (e instanceof Error && e.message === "session expired") {
           clearSession();
           setSession(null);
+          setScreen("welcome");
+        } else if (showedCached) {
+          // Offline but we have a saved profile: stay in the app.
+          setTimeout(() => showToast("You're offline — showing your saved profile. Bot & arcade modes work!", "err"), 600);
         } else {
           setTimeout(() => showToast("Couldn't reach the server — check your connection. Guest & bot modes still work!", "err"), 600);
+          setScreen("welcome");
         }
-        setScreen("welcome");
       }
     })();
 
@@ -313,6 +325,30 @@ export default function Page() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* Keep the on-device profile cache fresh for instant launches. */
+  useEffect(() => {
+    if (me && session && !session.isGuest) saveCachedProfile(me);
+  }, [me, session]);
+
+  /* Warm up heavy screens (arcade, shop) while the home screen idles, so
+     opening them is instant. Skipped on data-saver / 2G connections. */
+  useEffect(() => {
+    if (screen !== "home") return;
+    const conn = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+    if (conn?.saveData || (conn?.effectiveType && conn.effectiveType.includes("2g"))) return;
+    const warm = () => {
+      void import("@/components/MoreGames");
+      void import("@/components/Shop");
+    };
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
+    if (ric) {
+      const id = ric(warm, { timeout: 5000 });
+      return () => (window as unknown as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(id);
+    }
+    const t = setTimeout(warm, 3000);
+    return () => clearTimeout(t);
+  }, [screen]);
 
   /* heartbeat + light refresh */
   useEffect(() => {
@@ -715,7 +751,11 @@ export default function Page() {
       } catch {}
     };
     poll();
-    const t = setInterval(poll, 10000);
+    const conn = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+    const slowNet = !!(conn?.saveData || (conn?.effectiveType && conn.effectiveType.includes("2g")));
+    const t = setInterval(() => {
+      if (!document.hidden) poll();
+    }, slowNet ? 30000 : 12000);
     const onVis = () => { if (document.visibilityState === "visible") poll(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { alive = false; clearInterval(t); document.removeEventListener("visibilitychange", onVis); };
@@ -1029,8 +1069,8 @@ export default function Page() {
                 style={{ background: "linear-gradient(120deg,#FF4B6E,#A560E8 55%,#1CB0F6)", color: "#fff", border: "2px solid rgba(255,255,255,0.35)", boxShadow: "var(--shadow-card)" }}>
                 <span className="text-[34px] leading-none shrink-0" aria-hidden>🎮</span>
                 <span className="flex-1 min-w-0">
-                  <span className="font-display font-bold text-xl block leading-tight">More Games <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md align-middle" style={{ background: "#fff", color: "#D33131" }}>★ 12 REMAKES</span></span>
-                  <span className="text-xs font-bold block" style={{ color: "rgba(255,255,255,0.9)" }}>2048, Snake, Blackjack, Dino Dash &amp; 8 more rebuilt fullscreen — plus 11 classics!</span>
+                  <span className="font-display font-bold text-xl block leading-tight">More Games <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md align-middle" style={{ background: "#fff", color: "#D33131" }}>★ 18 REMAKES</span></span>
+                  <span className="text-xs font-bold block" style={{ color: "rgba(255,255,255,0.9)" }}>2048, Snake, Word Quest, Sudoku &amp; 14 more rebuilt for phones — plus 5 classics!</span>
                 </span>
                 <span className="btn-game px-4 py-2.5 shrink-0 text-sm" style={{ background: "#fff", color: "#7B2CBF", boxShadow: "0 4px 0 rgba(0,0,0,.25)" }}>Play</span>
               </button>

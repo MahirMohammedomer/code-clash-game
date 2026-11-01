@@ -1,10 +1,15 @@
-/* Cipher Clash service worker — network-first for pages & APIs,
-   cache-first for static assets. Bump VERSION to ship updates. */
-const VERSION = "cipher-clash-v7";
+/* Cipher Clash service worker — built for bad networks:
+   - Pages: stale-while-revalidate (cached copy shows INSTANTLY, fresh
+     copy downloads in the background for next time).
+   - Bundled arcade games (/games/*), thumbnails & build assets:
+     cache-first — after the first play they load instantly, fully offline.
+   - APIs: network only (never serve stale game data).
+   Bump VERSION to ship updates. */
+const VERSION = "cipher-clash-v8";
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 
-const PRECACHE = ["/manifest.json", "/icon-192.png", "/icon-512.png"];
+const PRECACHE = ["/", "/manifest.json", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -24,6 +29,34 @@ self.addEventListener("activate", (event) => {
       .then(() => self.clients.claim())
   );
 });
+
+/** Return the cached response immediately; refresh the cache in the background. */
+function staleWhileRevalidate(request, cacheName) {
+  return caches.open(cacheName).then((cache) =>
+    cache.match(request).then((cached) => {
+      const network = fetch(request)
+        .then((res) => {
+          if (res && res.status === 200) cache.put(request, res.clone());
+          return res;
+        })
+        .catch(() => cached);
+      return cached || network;
+    })
+  );
+}
+
+function cacheFirst(request, cacheName) {
+  return caches.open(cacheName).then((cache) =>
+    cache.match(request).then(
+      (cached) =>
+        cached ||
+        fetch(request).then((res) => {
+          if (res && res.status === 200) cache.put(request, res.clone());
+          return res;
+        })
+    )
+  );
+}
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
@@ -45,36 +78,23 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static build assets & icons: cache-first
+  // Bundled arcade games + thumbnails + build assets + fonts/icons:
+  // cache-first (immutable within a version; VERSION bumps flush them).
   if (
+    url.pathname.startsWith("/games/") ||
+    url.pathname.startsWith("/arcade/") ||
     url.pathname.startsWith("/_next/static/") ||
-    /\.(png|jpg|jpeg|svg|webp|ico|woff2?)$/.test(url.pathname)
+    /\.(png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf|otf|mp3|wav|ogg)$/.test(url.pathname)
   ) {
-    event.respondWith(
-      caches.match(request).then(
-        (cached) =>
-          cached ||
-          fetch(request).then((res) => {
-            const copy = res.clone();
-            caches.open(STATIC_CACHE).then((c) => c.put(request, copy));
-            return res;
-          })
-      )
-    );
+    event.respondWith(cacheFirst(request, STATIC_CACHE));
     return;
   }
 
-  // Pages: network-first, cache fallback (offline support)
+  // Pages & everything else: instant from cache, refresh behind the scenes.
   event.respondWith(
-    fetch(request)
-      .then((res) => {
-        if (res && res.status === 200) {
-          const copy = res.clone();
-          caches.open(PAGE_CACHE).then((c) => c.put(request, copy));
-        }
-        return res;
-      })
-      .catch(() => caches.match(request).then((r) => r || caches.match("/")))
+    staleWhileRevalidate(request, PAGE_CACHE).catch(() =>
+      caches.match(request).then((r) => r || caches.match("/"))
+    )
   );
 });
 

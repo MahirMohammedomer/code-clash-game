@@ -9,6 +9,7 @@
 import type { Player, RoomSession } from "./types";
 
 const SESSION_KEY = "cipherclash_session_v3";
+const PROFILE_CACHE_KEY = "cipherclash_profile_cache_v1";
 const GUEST_KEY = "cipherclash_guest_profile_v3";
 const ROOM_KEY = "cipherclash_room_v3";
 const PENDING_RESULTS_KEY = "cipherclash_pending_results_v3";
@@ -62,6 +63,25 @@ export function clearSession(): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(ROOM_KEY);
+  localStorage.removeItem(PROFILE_CACHE_KEY);
+}
+
+/**
+ * Last-known registered profile, cached on-device so the home screen can
+ * render INSTANTLY on launch (even offline) while fresh data loads behind
+ * the scenes. This is what kills the "Loading your arena..." wait on
+ * slow networks.
+ */
+export function loadCachedProfile(): Player | null {
+  if (typeof window === "undefined") return null;
+  return safeParse<Player | null>(localStorage.getItem(PROFILE_CACHE_KEY), null);
+}
+
+export function saveCachedProfile(p: Player): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(p));
+  } catch {}
 }
 
 export function loadGuestProfile(): Player | null {

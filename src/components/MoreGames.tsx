@@ -3,9 +3,10 @@
 /**
  * The Cipher Clash Arcade ("More Games") — one unified dark theme from
  * browsing to playing: deep-navy surfaces, one gradient accent, identical
- * calm cards everywhere. Features our twelve from-scratch premium remakes
+ * calm cards everywhere. Features our eighteen from-scratch premium remakes
  * (native in-app games with illustrated thumbnails) plus the community
- * mini-games bundled under /public/games/.
+ * mini-games bundled under /public/games/. Keyboard-only classics get an
+ * on-screen touch gamepad (TouchPad below) so every game works on phones.
  *
  * It takes over the whole screen (fixed, 100dvh) so the big BACK pill is
  * always visible — here, in the iframe player, and inside every remake.
@@ -13,7 +14,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { ArrowLeft, History, Keyboard, Maximize, Pointer, RotateCcw, Search, Sparkles, Trophy, X } from "lucide-react";
+import { ArrowLeft, Gamepad2, Heart, History, Maximize, Pointer, RotateCcw, Search, Sparkles, Trophy, X } from "lucide-react";
 import { MORE_GAMES, MORE_GAME_CATEGORIES, type MoreGame, type MoreGameCategory } from "@/lib/more-games";
 import { getBest } from "@/lib/arcade";
 import { soundEngine } from "@/lib/sound-effects";
@@ -32,6 +33,12 @@ const NATIVE_GAMES = {
   mines: dynamic(() => import("@/components/games/MineSweeper"), { ssr: false }),
   connect4: dynamic(() => import("@/components/games/ConnectFour"), { ssr: false }),
   blackjack: dynamic(() => import("@/components/games/Blackjack21"), { ssr: false }),
+  pong: dynamic(() => import("@/components/games/NeonPong"), { ssr: false }),
+  dash: dynamic(() => import("@/components/games/TurboDash"), { ssr: false }),
+  wordle: dynamic(() => import("@/components/games/WordQuest"), { ssr: false }),
+  sudoku: dynamic(() => import("@/components/games/SudokuMaster"), { ssr: false }),
+  slide: dynamic(() => import("@/components/games/SlidePuzzle"), { ssr: false }),
+  rps: dynamic(() => import("@/components/games/RockPaperScissors"), { ssr: false }),
 } as const;
 
 const RECENT_KEY = "cipherclash_recent_games";
@@ -55,14 +62,15 @@ function loadList(key: string): string[] {
   }
 }
 
-function ControlsBadge({ controls }: { controls: MoreGame["controls"] }) {
+function ControlsBadge({ game }: { game: MoreGame }) {
+  const { controls } = game;
   return (
     <span
       className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-md text-white"
       style={{ background: "rgba(10,10,25,0.62)", backdropFilter: "blur(2px)" }}
     >
-      {controls === "keyboard" ? <Keyboard size={10} /> : <Pointer size={10} />}
-      {controls === "keyboard" ? "Keyboard" : controls === "touch" ? "Touch" : "Touch + Keys"}
+      {controls === "keyboard" ? <Gamepad2 size={10} /> : <Pointer size={10} />}
+      {controls === "keyboard" ? "Touch pad" : controls === "touch" ? "Touch" : "Touch + Keys"}
     </span>
   );
 }
@@ -94,7 +102,9 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
   const [favorites, setFavorites] = useState<string[]>(() => loadList(FAV_KEY));
   const [isTouch, setIsTouch] = useState(false);
   const [bestsTick, setBestsTick] = useState(0);
+  const [showPad, setShowPad] = useState(false);
   const playerWrapRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const closePlayer = useCallback(() => {
     setPlaying(null);
@@ -130,11 +140,18 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
     () => recent.map((slug) => MORE_GAMES.find((g) => g.slug === slug)).filter(Boolean) as MoreGame[],
     [recent]
   );
+  const favoriteGames = useMemo(
+    () => favorites.map((slug) => MORE_GAMES.find((g) => g.slug === slug)).filter(Boolean) as MoreGame[],
+    [favorites]
+  );
 
   const play = (game: MoreGame) => {
     soundEngine.playJoin();
     setPlaying(game);
     setReloadTick(0);
+    // keyboard-only classics get the on-screen pad automatically on phones
+    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    setShowPad(!game.native && game.controls === "keyboard" && coarse);
     const next = [game.slug, ...recent.filter((s) => s !== game.slug)].slice(0, 6);
     setRecent(next);
     try {
@@ -175,7 +192,7 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
         <span className={`block w-full ${large ? "aspect-[16/10]" : "aspect-[4/3]"} rounded-2xl overflow-hidden relative`} aria-hidden>
           {g.thumb ? (
             // eslint-disable-next-line @next/next/no-img-element -- static illustrated thumbnail
-            <img src={g.thumb} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+            <img src={g.thumb} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" decoding="async" />
           ) : (
             <span className="absolute inset-0 flex items-center justify-center text-5xl" style={{ background: TILE_ART }}>
               <span className="drop-shadow-[0_3px_6px_rgba(0,0,0,0.5)]">{g.emoji}</span>
@@ -187,7 +204,7 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
             </span>
           )}
           <span className="absolute bottom-1.5 left-1.5">
-            <ControlsBadge controls={g.controls} />
+            <ControlsBadge game={g} />
           </span>
           {best > 0 && (
             <span className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-md" style={{ background: "rgba(255,200,0,0.94)", color: "#5A3A00" }}>
@@ -300,6 +317,37 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
         <div className="max-w-6xl mx-auto px-3 sm:px-5 pt-4 pb-14">
           {isDefaultView ? (
             <>
+              {/* favorites — one-tap access to starred games */}
+              {favoriteGames.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="font-display font-semibold flex items-center gap-1.5 mb-2 text-white">
+                    <Heart size={16} style={{ color: "#FB7185" }} fill="#FB7185" /> Your favorites
+                  </h3>
+                  <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                    {favoriteGames.map((g) => (
+                      <button
+                        key={g.slug}
+                        type="button"
+                        onClick={() => play(g)}
+                        className="shrink-0 pl-1.5 pr-3 py-1.5 rounded-2xl flex items-center gap-2 active:scale-95 transition-transform"
+                        style={{ background: "rgba(251,113,133,0.12)", border: "1.5px solid rgba(251,113,133,0.35)" }}
+                      >
+                        {g.thumb ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- static illustrated thumbnail
+                          <img src={g.thumb} alt="" className="w-9 h-9 rounded-xl object-cover" loading="lazy" decoding="async" />
+                        ) : (
+                          <span className="w-9 h-9 rounded-xl flex items-center justify-center text-[19px]" style={{ background: TILE_ART }} aria-hidden>
+                            {g.emoji}
+                          </span>
+                        )}
+                        <span className="font-display font-semibold text-sm text-white">{g.title}</span>
+                        <span aria-hidden>▶</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* recently played */}
               {recentGames.length > 0 && (
                 <div className="mb-6">
@@ -317,7 +365,7 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
                       >
                         {g.thumb ? (
                           // eslint-disable-next-line @next/next/no-img-element -- static illustrated thumbnail
-                          <img src={g.thumb} alt="" className="w-9 h-9 rounded-xl object-cover" loading="lazy" />
+                          <img src={g.thumb} alt="" className="w-9 h-9 rounded-xl object-cover" loading="lazy" decoding="async" />
                         ) : (
                           <span className="w-9 h-9 rounded-xl flex items-center justify-center text-[19px]" style={{ background: TILE_ART }} aria-hidden>
                             {g.emoji}
@@ -429,16 +477,34 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
             >
               <Maximize size={17} strokeWidth={2.7} />
             </button>
+            {playing.controls === "keyboard" && (
+              <button
+                onClick={() => {
+                  soundEngine.playTap(560);
+                  setShowPad((v) => !v);
+                }}
+                className="btn-game h-10 px-2.5 !rounded-xl flex items-center gap-1 shrink-0 text-white text-[11px] font-black"
+                style={
+                  showPad
+                    ? { background: ACCENT, border: "2px solid rgba(255,255,255,0.4)", boxShadow: "0 3px 0 rgba(0,0,0,0.35)" }
+                    : { background: "rgba(255,255,255,0.09)", border: "2px solid rgba(255,255,255,0.2)", boxShadow: "0 3px 0 rgba(0,0,0,0.35)" }
+                }
+                title="Toggle on-screen gamepad"
+              >
+                <Gamepad2 size={17} strokeWidth={2.7} /> PAD
+              </button>
+            )}
           </div>
 
-          {playing.controls === "keyboard" && isTouch && (
-            <p className="text-center text-xs font-black px-3 py-2 shrink-0" style={{ background: "rgba(255,200,0,0.16)", color: "#FFD94D" }}>
-              ⌨️ {playing.title} plays best with a keyboard — grab a laptop or pair one to your phone!
+          {playing.controls === "keyboard" && isTouch && showPad && (
+            <p className="text-center text-xs font-black px-3 py-2 shrink-0" style={{ background: "rgba(88,204,2,0.16)", color: "#B5E048" }}>
+              🎮 Touch pad on — use the buttons at the bottom to play! (PAD button hides it)
             </p>
           )}
 
-          <div ref={playerWrapRef} className="flex-1 min-h-0" style={{ background: "#14152B" }}>
+          <div ref={playerWrapRef} className="flex-1 min-h-0 relative" style={{ background: "#14152B" }}>
             <iframe
+              ref={iframeRef}
               key={`${playing.slug}-${reloadTick}`}
               src={`/games/${playing.slug}/index.html`}
               title={playing.title}
@@ -447,9 +513,178 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
               sandbox="allow-scripts allow-same-origin allow-pointer-lock"
               allow="fullscreen"
             />
+            {showPad && <TouchPad mode={playing.pad ?? "arrows"} iframeRef={iframeRef} />}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ============================ on-screen gamepad ============================ */
+
+interface KeyDef { key: string; code: string; keyCode: number }
+const KEYS: Record<string, KeyDef> = {
+  left: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
+  up: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
+  right: { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
+  down: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
+  a: { key: "a", code: "KeyA", keyCode: 65 },
+  d: { key: "d", code: "KeyD", keyCode: 68 },
+  w: { key: "w", code: "KeyW", keyCode: 87 },
+  s: { key: "s", code: "KeyS", keyCode: 83 },
+  space: { key: " ", code: "Space", keyCode: 32 },
+  enter: { key: "Enter", code: "Enter", keyCode: 13 },
+};
+
+function dispatchKey(iframe: HTMLIFrameElement | null, type: "keydown" | "keyup", def: KeyDef) {
+  const win = iframe?.contentWindow;
+  if (!win) return;
+  const make = () => {
+    const ev = new KeyboardEvent(type, { key: def.key, code: def.code, bubbles: true, cancelable: true });
+    try {
+      Object.defineProperty(ev, "keyCode", { get: () => def.keyCode });
+      Object.defineProperty(ev, "which", { get: () => def.keyCode });
+    } catch {}
+    return ev;
+  };
+  try {
+    win.dispatchEvent(make());
+    win.document?.dispatchEvent(make());
+  } catch {}
+}
+
+/**
+ * Translucent touch buttons that play keyboard-only bundled games on phones
+ * by sending real key events into the (same-origin) game iframe.
+ * "arrows": D-pad (arrows + WASD together) + SPACE + ENTER.
+ * "dual": two mini-pads — left = WASD+Space (player 1), right = arrows (player 2).
+ */
+function PadButton({
+  defs,
+  repeat = true,
+  iframeRef,
+  className,
+  style,
+  label,
+  children,
+}: {
+  defs: KeyDef[];
+  repeat?: boolean;
+  iframeRef: React.RefObject<HTMLIFrameElement | null>;
+  className?: string;
+  style?: React.CSSProperties;
+  label: string;
+  children: React.ReactNode;
+}) {
+  const ivRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (ivRef.current) clearInterval(ivRef.current);
+    };
+  }, []);
+
+  const release = () => {
+    if (ivRef.current) {
+      clearInterval(ivRef.current);
+      ivRef.current = null;
+    }
+    for (const d of defs) dispatchKey(iframeRef.current, "keyup", d);
+  };
+
+  return (
+    <button
+      type="button"
+      className={className}
+      style={style}
+      aria-label={label}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        for (const d of defs) dispatchKey(iframeRef.current, "keydown", d);
+        if (repeat) {
+          ivRef.current = setInterval(() => {
+            for (const d of defs) dispatchKey(iframeRef.current, "keydown", d);
+          }, 120);
+        }
+      }}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onPointerLeave={release}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TouchPad({ mode, iframeRef }: { mode: "arrows" | "dual"; iframeRef: React.RefObject<HTMLIFrameElement | null> }) {
+  const btn: React.CSSProperties = {
+    background: "rgba(20,21,43,0.55)",
+    border: "2px solid rgba(255,255,255,0.4)",
+    boxShadow: "0 3px 0 rgba(0,0,0,0.45)",
+    backdropFilter: "blur(2px)",
+    color: "#fff",
+    touchAction: "none",
+    userSelect: "none",
+    WebkitUserSelect: "none",
+  };
+  const dirBtn = "w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-black active:scale-95";
+  const atkBtn = "w-14 h-14 rounded-full flex items-center justify-center text-xl active:scale-95";
+  const atkStyle: React.CSSProperties = { ...btn, background: "rgba(255,75,110,0.6)" };
+
+  if (mode === "dual") {
+    return (
+      <div className="absolute inset-x-0 bottom-0 z-10 flex items-end justify-between p-3 pointer-events-none" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
+        {/* Player 1: A/D move, W jump, SPACE attack */}
+        <div className="flex flex-col items-center gap-1.5 pointer-events-auto">
+          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full" style={{ background: "rgba(28,176,246,0.35)", color: "#BFDBFE" }}>Player 1</span>
+          <div className="flex items-center gap-1.5">
+            <PadButton defs={[KEYS.a]} iframeRef={iframeRef} className={dirBtn} style={btn} label="P1 left">◀</PadButton>
+            <div className="flex flex-col gap-1.5">
+              <PadButton defs={[KEYS.w]} repeat={false} iframeRef={iframeRef} className={dirBtn} style={btn} label="P1 jump">▲</PadButton>
+              <PadButton defs={[KEYS.space]} repeat={false} iframeRef={iframeRef} className={atkBtn} style={atkStyle} label="P1 attack">⚔️</PadButton>
+            </div>
+            <PadButton defs={[KEYS.d]} iframeRef={iframeRef} className={dirBtn} style={btn} label="P1 right">▶</PadButton>
+          </div>
+        </div>
+        {/* Player 2: arrows move/jump, down attacks */}
+        <div className="flex flex-col items-center gap-1.5 pointer-events-auto">
+          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full" style={{ background: "rgba(255,75,110,0.35)", color: "#FECDD3" }}>Player 2</span>
+          <div className="flex items-center gap-1.5">
+            <PadButton defs={[KEYS.left]} iframeRef={iframeRef} className={dirBtn} style={btn} label="P2 left">◀</PadButton>
+            <div className="flex flex-col gap-1.5">
+              <PadButton defs={[KEYS.up]} repeat={false} iframeRef={iframeRef} className={dirBtn} style={btn} label="P2 jump">▲</PadButton>
+              <PadButton defs={[KEYS.down]} repeat={false} iframeRef={iframeRef} className={atkBtn} style={atkStyle} label="P2 attack">⚔️</PadButton>
+            </div>
+            <PadButton defs={[KEYS.right]} iframeRef={iframeRef} className={dirBtn} style={btn} label="P2 right">▶</PadButton>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // arrows mode: D-pad sends arrows AND WASD (games vary), plus SPACE / ENTER
+  return (
+    <div className="absolute inset-x-0 bottom-0 z-10 flex items-end justify-between p-3 pointer-events-none" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
+      <div className="flex items-center gap-1.5 pointer-events-auto">
+        <PadButton defs={[KEYS.left, KEYS.a]} iframeRef={iframeRef} className={dirBtn} style={btn} label="Left">◀</PadButton>
+        <div className="flex flex-col gap-1.5">
+          <PadButton defs={[KEYS.up, KEYS.w]} iframeRef={iframeRef} className={dirBtn} style={btn} label="Up">▲</PadButton>
+          <PadButton defs={[KEYS.down, KEYS.s]} iframeRef={iframeRef} className={dirBtn} style={btn} label="Down">▼</PadButton>
+        </div>
+        <PadButton defs={[KEYS.right, KEYS.d]} iframeRef={iframeRef} className={dirBtn} style={btn} label="Right">▶</PadButton>
+      </div>
+      <div className="flex items-end gap-2 pointer-events-auto">
+        <PadButton defs={[KEYS.enter]} repeat={false} iframeRef={iframeRef} className="w-14 h-14 rounded-full flex flex-col items-center justify-center active:scale-95" style={{ ...btn, background: "rgba(255,200,0,0.55)" }} label="Enter">
+          <span className="text-base leading-none">⏎</span>
+          <span className="text-[7px] font-black">ENTER</span>
+        </PadButton>
+        <PadButton defs={[KEYS.space]} iframeRef={iframeRef} className="w-[76px] h-[76px] rounded-full flex flex-col items-center justify-center active:scale-95" style={{ ...btn, background: "rgba(88,204,2,0.6)" }} label="Space / action">
+          <span className="text-2xl leading-none">●</span>
+          <span className="text-[8px] font-black">SPACE</span>
+        </PadButton>
+      </div>
     </div>
   );
 }
