@@ -8,7 +8,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArcadeShell, GameOverCard, StartHint } from "./Shell";
-import { bumpPlays, getBest, submitScore } from "@/lib/arcade";
+import { bumpPlays, getBest, submitScore, arcadeDpr } from "@/lib/arcade";
 import { sfx } from "@/lib/arcade-sound";
 
 interface Pipe { x: number; gapY: number; passed: boolean }
@@ -128,7 +128,7 @@ export default function Flappy({ onBack }: { onBack: () => void }) {
       engineRef.current.uScale = U;
       PIPE_W = 74 * U;
       GAP = Math.max(126, Math.min(250, 168 * U));
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = arcadeDpr();
       canvas.width = W * dpr;
       canvas.height = H * dpr;
       canvas.style.width = `${W}px`;

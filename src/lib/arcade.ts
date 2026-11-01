@@ -5,7 +5,27 @@
 
 export type ArcadeGameId =
   | "g2048" | "snake" | "flappy" | "gems" | "breakout" | "hopper"
-  | "dino" | "defender" | "mole" | "mines" | "connect4" | "blackjack";
+  | "dino" | "defender" | "mole" | "mines" | "connect4" | "blackjack"
+  | "pong" | "dash" | "wordle" | "sudoku" | "slide" | "rps";
+
+/**
+ * Canvas pixel ratio tuned for weak phones: full sharpness on desktop,
+ * gentler on touch devices (far fewer pixels to fill = much smoother on
+ * phones without a real GPU), gentlest when Data Saver / 2G is detected.
+ */
+export function arcadeDpr(): number {
+  if (typeof window === "undefined") return 1;
+  const dpr = window.devicePixelRatio || 1;
+  try {
+    const conn = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+    if (conn?.saveData || conn?.effectiveType === "2g" || conn?.effectiveType === "slow-2g") return 1;
+    const cores = navigator.hardwareConcurrency ?? 4;
+    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    if (cores <= 2) return Math.min(1.25, dpr);
+    if (coarse) return Math.min(1.5, dpr);
+  } catch {}
+  return Math.min(2, dpr);
+}
 
 const bestKey = (id: ArcadeGameId) => `arcade_best_${id}`;
 const playsKey = (id: ArcadeGameId) => `arcade_plays_${id}`;

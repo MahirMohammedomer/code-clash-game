@@ -87,6 +87,10 @@ export const sfx = {
     tone(660, 0.08, "triangle", 0.16, 990);
     tone(990, 0.1, "sine", 0.1, undefined, 0.05);
   },
+  coin: () => {
+    tone(988, 0.07, "square", 0.1);
+    tone(1319, 0.16, "square", 0.1, undefined, 0.06);
+  },
   golden: () => {
     [880, 1174, 1568].forEach((f, i) => tone(f, 0.12, "triangle", 0.13, undefined, i * 0.06));
   },

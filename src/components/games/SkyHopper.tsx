@@ -8,7 +8,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArcadeShell, GameOverCard, StartHint } from "./Shell";
-import { bumpPlays, getBest, submitScore } from "@/lib/arcade";
+import { bumpPlays, getBest, submitScore, arcadeDpr } from "@/lib/arcade";
 import { sfx } from "@/lib/arcade-sound";
 
 type PlatType = "normal" | "moving" | "break";
@@ -126,7 +126,7 @@ export default function SkyHopper({ onBack }: { onBack: () => void }) {
       const rect = wrap.getBoundingClientRect();
       W = Math.max(240, Math.floor(rect.width));
       H = Math.max(300, Math.floor(rect.height));
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = arcadeDpr();
       canvas.width = W * dpr;
       canvas.height = H * dpr;
       canvas.style.width = `${W}px`;
