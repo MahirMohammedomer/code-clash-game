@@ -1069,8 +1069,8 @@ export default function Page() {
                 style={{ background: "linear-gradient(120deg,#FF4B6E,#A560E8 55%,#1CB0F6)", color: "#fff", border: "2px solid rgba(255,255,255,0.35)", boxShadow: "var(--shadow-card)" }}>
                 <span className="text-[34px] leading-none shrink-0" aria-hidden>🎮</span>
                 <span className="flex-1 min-w-0">
-                  <span className="font-display font-bold text-xl block leading-tight">More Games <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md align-middle" style={{ background: "#fff", color: "#D33131" }}>★ 18 REMAKES</span></span>
-                  <span className="text-xs font-bold block" style={{ color: "rgba(255,255,255,0.9)" }}>2048, Snake, Word Quest, Sudoku &amp; 14 more rebuilt for phones — plus 5 classics!</span>
+                  <span className="font-display font-bold text-xl block leading-tight">More Games <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md align-middle" style={{ background: "#fff", color: "#D33131" }}>★ 23 REMAKES</span></span>
+                  <span className="text-xs font-bold block" style={{ color: "rgba(255,255,255,0.9)" }}>2048, Snake, Castle Defense, Creature Cards &amp; 19 more rebuilt for phones!</span>
                 </span>
                 <span className="btn-game px-4 py-2.5 shrink-0 text-sm" style={{ background: "#fff", color: "#7B2CBF", boxShadow: "0 4px 0 rgba(0,0,0,.25)" }}>Play</span>
               </button>

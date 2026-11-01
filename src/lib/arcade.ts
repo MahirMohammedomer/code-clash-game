@@ -6,7 +6,8 @@
 export type ArcadeGameId =
   | "g2048" | "snake" | "flappy" | "gems" | "breakout" | "hopper"
   | "dino" | "defender" | "mole" | "mines" | "connect4" | "blackjack"
-  | "pong" | "dash" | "wordle" | "sudoku" | "slide" | "rps";
+  | "pong" | "dash" | "wordle" | "sudoku" | "slide" | "rps"
+  | "duel" | "defense" | "jigsaw" | "cards" | "keys";
 
 /**
  * Canvas pixel ratio tuned for weak phones: full sharpness on desktop,

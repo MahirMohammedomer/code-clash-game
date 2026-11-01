@@ -115,6 +115,18 @@
 }
 .rps-shake { animation: rpsShake 0.31s ease-in-out infinite; }
 
+/* Holographic sweep for epic/legendary creature cards. */
+@keyframes holoSweep {
+  0% { background-position: -180% 0; }
+  100% { background-position: 280% 0; }
+}
+.holo-sweep {
+  background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.4) 46%, rgba(180,240,255,0.55) 52%, rgba(255,200,240,0.45) 58%, transparent 72%);
+  background-size: 220% 100%;
+  animation: holoSweep 2.6s ease-in-out infinite;
+  mix-blend-mode: screen;
+}
+
 @keyframes bannerPop {
   0% { opacity: 0; transform: scale(0.6); }
   60% { opacity: 1; transform: scale(1.08); }
