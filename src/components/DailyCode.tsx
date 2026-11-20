@@ -12,6 +12,7 @@ import { historyPayload, newHistoryId, saveLocalHistoryEntry } from "@/lib/histo
 import { makeId, tzEastMinutes } from "@/lib/session";
 import { soundEngine } from "@/lib/sound-effects";
 import type { GuessEntry, HistoryEntry, Player } from "@/lib/types";
+import Credits from "@/components/Credits";
 
 interface SavedState {
   feedback: { guess: string; points: number; orders: number }[];
@@ -274,6 +275,10 @@ export default function DailyCode({
             </button>
           </div>
         )}
+
+        <div style={{ color: "var(--board-ink)" }}>
+          <Credits compact />
+        </div>
       </div>
 
       {!state.done && (

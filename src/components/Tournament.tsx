@@ -9,6 +9,7 @@ import { fireWinEffect } from "@/lib/win-effects";
 import { makeId } from "@/lib/session";
 import { soundEngine } from "@/lib/sound-effects";
 import type { GuessEntry, Player, TournamentView } from "@/lib/types";
+import Credits from "@/components/Credits";
 
 function guestKey(): string {
   try {
@@ -378,6 +379,8 @@ export default function Tournament({
           )}
         </>
       )}
+
+      <Credits />
     </div>
   );
 }

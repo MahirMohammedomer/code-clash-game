@@ -5,11 +5,12 @@ import {
   ArrowLeft, Bot, CalendarCheck, Check, ChevronRight, Coins, Download, Flame, Gem,
   Globe, GraduationCap, KeyRound, Loader2, Lock, LogOut, Medal, MessageSquare,
   Moon, Play, Plus, Settings, Shield, ShoppingBag, Star, Sun, Swords, Target, Trophy,
-  User, Users, Volume2, VolumeX, Zap, Crown, Timer, Sparkles, X, DoorOpen,
-  Bell, BellOff, Eye, Gamepad2, History, QrCode, UserPlus, Wifi,
+  User, Users, Volume2, VolumeX, Zap, Timer, Sparkles, X, DoorOpen,
+  Bell, BellOff, History, QrCode, Wifi, Joystick, MessageCircle, WifiOff,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import GameBoard, { type GameConfig, type GameOutcome } from "@/components/GameBoard";
+import Credits from "@/components/Credits";
 
 // Heavy screens are code-split so the first load stays snappy.
 const Shop = dynamic(() => import("@/components/Shop"), { loading: () => <ScreenLoading label="Opening the shop..." /> });
@@ -39,7 +40,53 @@ import {
 import { soundEngine } from "@/lib/sound-effects";
 import type { InviteView, LeaderboardRow, Player, RoomSession, SeasonInfo, SocialPlayer } from "@/lib/types";
 
-type Screen = "boot" | "welcome" | "home" | "shop" | "rank" | "community" | "game" | "friends" | "history" | "dailycode" | "tournaments" | "spectate" | "moregames";
+type Screen = "boot" | "welcome" | "home" | "shop" | "rank" | "game" | "history" | "dailycode" | "tournaments" | "spectate" | "moregames" | "social" | "me";
+
+/** The four main pages of the app (bottom tab bar). */
+type TabId = "home" | "moregames" | "social" | "me";
+type SocialTab = "chat" | "friends" | "reviews" | "feedback" | "admin";
+
+const SOCIAL_TABS: { id: SocialTab; label: string }[] = [
+  { id: "chat", label: "Lobby Chat" },
+  { id: "friends", label: "Friends" },
+  { id: "reviews", label: "Reviews" },
+  { id: "feedback", label: "Feedback" },
+];
+
+/* --------------------- install / notification ask pacing --------------------- */
+
+const INSTALL_ASK_KEY = "cipherclash_install_ask";
+const NOTIF_ASK_KEY = "cipherclash_notif_ask";
+const INSTALL_MAX_ASKS = 5;
+const NOTIF_MAX_ASKS = 3;
+const ASK_GAP_MS = 2 * 24 * 60 * 60 * 1000; // never nag more than once every 2 days
+
+function readAskStore(key: string): { count: number; last: number } {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const o = JSON.parse(raw) as { count?: number; last?: number };
+      const count = typeof o.count === "number" ? Math.floor(o.count) : 0;
+      const last = typeof o.last === "number" ? Math.floor(o.last) : 0;
+      return { count, last };
+    }
+  } catch {}
+  return { count: 0, last: 0 };
+}
+
+function writeAskStore(key: string, count: number, last: number) {
+  try { localStorage.setItem(key, JSON.stringify({ count, last })); } catch {}
+}
+
+function canAutoAsk(key: string, maxAsks: number): boolean {
+  const s = readAskStore(key);
+  return s.count < maxAsks && Date.now() - s.last > ASK_GAP_MS;
+}
+
+function recordAsk(key: string) {
+  const s = readAskStore(key);
+  writeAskStore(key, s.count + 1, Date.now());
+}
 
 interface Toast { id: number; msg: string; kind: "ok" | "err" }
 
@@ -168,7 +215,6 @@ export default function Page() {
   const [showTutorial, setShowTutorial] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [communityTab, setCommunityTab] = useState<"reviews" | "feedback" | "lobby" | "admin">("reviews");
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [isDark, setIsDark] = useState(false);
@@ -184,6 +230,14 @@ export default function Page() {
   const [friendsOnline, setFriendsOnline] = useState(0);
   const [pushOn, setPushOn] = useState(false);
   const [pushSupported, setPushSupported] = useState(false);
+  const [socialTab, setSocialTab] = useState<SocialTab>("chat");
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  const [installBannerClosed, setInstallBannerClosed] = useState(false);
+  const [showNotifAsk, setShowNotifAsk] = useState(false);
+  const [offline, setOffline] = useState(false);
+  const [arcadePlaying, setArcadePlaying] = useState(false);
+
+  const prevScreenRef = useRef<Screen>("home");
 
   const lastSeasonToastRef = useRef("");
   const seenOnlineRef = useRef<Set<number>>(new Set());
@@ -193,6 +247,9 @@ export default function Page() {
   const screenRef = useRef(screen);
   // eslint-disable-next-line react-hooks/refs
   screenRef.current = screen;
+  const showTutorialRef = useRef(false);
+  // eslint-disable-next-line react-hooks/refs
+  showTutorialRef.current = showTutorial;
 
   const [installEvt, setInstallEvt] = useState<{ prompt: () => void; userChoice: Promise<{ outcome: string }> } | null>(null);
   const [lastTimer, setLastTimer] = useState(45);
@@ -234,7 +291,14 @@ export default function Page() {
       setInstallEvt(e as unknown as { prompt: () => void; userChoice: Promise<{ outcome: string }> });
     };
     window.addEventListener("beforeinstallprompt", onBIP);
-    const onInstalled = () => { setInstallEvt(null); setIsStandalone(true); showToast("Cipher Clash installed! Find it on your home screen."); };
+    const onInstalled = () => {
+      setInstallEvt(null);
+      setIsStandalone(true);
+      setShowInstallModal(false);
+      writeAskStore(INSTALL_ASK_KEY, INSTALL_MAX_ASKS, Date.now()); // installed → stop auto-asking
+      try { localStorage.setItem("cipherclash_installed", "1"); } catch {}
+      showToast("Cipher Clash installed! Find it on your home screen. 🎉");
+    };
     window.addEventListener("appinstalled", onInstalled);
 
     (async () => {
@@ -350,6 +414,134 @@ export default function Page() {
     return () => clearTimeout(t);
   }, [screen]);
 
+  /* ------------------------- offline support ------------------------- */
+  /* Track connectivity for the offline banner & friendly states. */
+  useEffect(() => {
+    const update = () => setOffline(!navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => { window.removeEventListener("online", update); window.removeEventListener("offline", update); };
+  }, []);
+
+  /** Tell the service worker everything this session loaded so the WHOLE app
+      (every tab, every screen, every arcade game) works with zero network. */
+  const sendCacheUrls = useCallback(() => {
+    try {
+      if (!("serviceWorker" in navigator)) return;
+      const urls = new Set<string>([window.location.href]);
+      for (const e of performance.getEntriesByType("resource")) urls.add(e.name);
+      navigator.serviceWorker.ready
+        .then((reg) => reg.active?.postMessage({ type: "CACHE_URLS", urls: Array.from(urls) }))
+        .catch(() => {});
+    } catch {}
+  }, []);
+
+  /* After the first home render, silently pre-download EVERY screen's chunk
+     (shop, social, replays, hunts, arcade…) and then hand the full URL list
+     to the service worker. After one online session the app is 100% offline. */
+  useEffect(() => {
+    if (screen !== "home" || !me) return;
+    const conn = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+    if (conn?.saveData || (conn?.effectiveType && conn.effectiveType.includes("2g"))) return;
+    let cancelled = false;
+    const warmAll = async () => {
+      try {
+        await Promise.allSettled([
+          import("@/components/Shop"),
+          import("@/components/Community"),
+          import("@/components/Tutorial"),
+          import("@/components/Friends"),
+          import("@/components/PlayerCard"),
+          import("@/components/PeerLocal"),
+          import("@/components/Spectate"),
+          import("@/components/MatchHistory"),
+          import("@/components/DailyCode"),
+          import("@/components/Tournament"),
+          import("@/components/MoreGames"),
+        ]);
+      } catch {}
+      if (!cancelled) setTimeout(sendCacheUrls, 400);
+    };
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
+    let ricId = 0;
+    const tt = setTimeout(() => {
+      if (ric) ricId = ric(() => void warmAll(), { timeout: 8000 });
+      else void warmAll();
+    }, 3500);
+    const onVis = () => { if (document.visibilityState === "visible") setTimeout(sendCacheUrls, 1500); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      cancelled = true;
+      clearTimeout(tt);
+      if (ricId) (window as unknown as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(ricId);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [screen, me, sendCacheUrls]);
+
+  /* ------------------------- install & notification prompts ------------------------- */
+  /* Ask the user to INSTALL the app: shortly after opening, and again on
+     later visits / after finishing games (spaced at least 2 days apart).
+     Waits politely while the tutorial is on screen. */
+  useEffect(() => {
+    if (screen === "boot" || isStandalone) return;
+    if (readAskStore(INSTALL_ASK_KEY).count >= INSTALL_MAX_ASKS) return;
+    const hasPromptChannel = !!installEvt || /iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (!hasPromptChannel) return;
+    if (!canAutoAsk(INSTALL_ASK_KEY, INSTALL_MAX_ASKS)) return;
+    let iv = 0;
+    const t = setTimeout(() => {
+      iv = window.setInterval(() => {
+        if (!canAutoAsk(INSTALL_ASK_KEY, INSTALL_MAX_ASKS)) { clearInterval(iv); return; }
+        if (document.visibilityState !== "visible" || showTutorialRef.current) return;
+        clearInterval(iv);
+        recordAsk(INSTALL_ASK_KEY);
+        setShowInstallModal(true);
+      }, 2500);
+    }, 7000);
+    return () => { clearTimeout(t); if (iv) clearInterval(iv); };
+  }, [screen === "boot", isStandalone, installEvt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Ask the user to ENABLE NOTIFICATIONS (registered players only): a little
+     after opening, right after installing, and on later visits. */
+  useEffect(() => {
+    if (!pushSupported || !token || session?.isGuest || pushOn) return;
+    if (!canAutoAsk(NOTIF_ASK_KEY, NOTIF_MAX_ASKS)) return;
+    const delay = isStandalone ? 4000 : 24000; // just installed? ask soon
+    const t = setTimeout(() => {
+      if (!canAutoAsk(NOTIF_ASK_KEY, NOTIF_MAX_ASKS) || document.visibilityState !== "visible") return;
+      recordAsk(NOTIF_ASK_KEY);
+      setShowNotifAsk(true);
+    }, delay);
+    return () => clearTimeout(t);
+  }, [pushSupported, token, session?.isGuest, pushOn, isStandalone]);
+
+  /** Post-game install nudge: once per session, paced like the others. */
+  const postGameAskRef = useRef(false);
+  const maybePostGameInstallAsk = useCallback(() => {
+    if (postGameAskRef.current || isStandalone) return;
+    if (readAskStore(INSTALL_ASK_KEY).count >= INSTALL_MAX_ASKS) return;
+    const hasPromptChannel = !!installEvt || /iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (!hasPromptChannel || !canAutoAsk(INSTALL_ASK_KEY, INSTALL_MAX_ASKS)) return;
+    postGameAskRef.current = true;
+    setTimeout(() => {
+      if (document.visibilityState === "visible") {
+        recordAsk(INSTALL_ASK_KEY);
+        setShowInstallModal(true);
+      }
+    }, 4500);
+  }, [isStandalone, installEvt]);
+
+  /** Open a secondary screen (shop, rank, replays…) remembering where to go back. */
+  const openSecondary = useCallback((s: Screen) => {
+    prevScreenRef.current = screen;
+    setScreen(s);
+  }, [screen]);
+
+  const goBack = useCallback(() => {
+    setScreen(prevScreenRef.current && prevScreenRef.current !== screen ? prevScreenRef.current : "home");
+  }, [screen]);
+
   /* heartbeat + light refresh */
   useEffect(() => {
     if (!token) return;
@@ -414,6 +606,9 @@ export default function Page() {
     setProfilePlayerId(null);
     setShowSettings(false);
     setShowProfile(false);
+    setShowInstallModal(false);
+    setShowNotifAsk(false);
+    prevScreenRef.current = "home";
     setScreen("welcome");
   };
 
@@ -431,6 +626,7 @@ export default function Page() {
         const ach = ACHIEVEMENTS.find((a) => a.id === id);
         if (ach) setTimeout(() => showToast(`Achievement unlocked: ${ach.title} (+${ach.rewardGems} gems)`), 900);
       }
+      maybePostGameInstallAsk();
       return;
     }
     const payload = {
@@ -456,7 +652,8 @@ export default function Page() {
     } catch {
       queuePendingResult(payload);
     }
-  }, [me, session, token, showToast, applySeasonToUi]);
+    maybePostGameInstallAsk();
+  }, [me, session, token, showToast, applySeasonToUi, maybePostGameInstallAsk]);
 
   /* --------------------------- shop actions --------------------------- */
   const handleBuy = async (item: CosmeticItem) => {
@@ -558,6 +755,34 @@ export default function Page() {
     else showToast("Almost there — open your browser menu and tap “Install app”.");
   };
 
+  /** Install button used by banners & modals: records intent, then prompts. */
+  const startInstallFromUi = async () => {
+    soundEngine.playTap(700);
+    setShowInstallModal(false);
+    if (installEvt) {
+      try {
+        installEvt.prompt();
+        await installEvt.userChoice;
+        setInstallEvt(null);
+      } catch {}
+      return;
+    }
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (isIOS) setShowIosInstall(true);
+    else showToast("Almost there — open your browser menu and tap “Install app”.");
+  };
+
+  const dismissInstallModal = () => {
+    setShowInstallModal(false);
+    soundEngine.playTap(420);
+  };
+
+  /** Enable notifications from the ask-modal (reuses the settings toggle). */
+  const enablePushFromUi = async () => {
+    setShowNotifAsk(false);
+    await togglePush();
+  };
+
   const setTheme = (dark: boolean) => {
     document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
     localStorage.setItem("cipherclash_theme", dark ? "dark" : "light");
@@ -577,8 +802,8 @@ export default function Page() {
     } catch {}
   }, []);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- read push subscription status when settings open
-  useEffect(() => { if (showSettings) void refreshPushState(); }, [showSettings, refreshPushState]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- read push subscription status on boot & when settings open
+  useEffect(() => { void refreshPushState(); if (showSettings) void refreshPushState(); }, [showSettings, refreshPushState]);
 
   const togglePush = async () => {
     try {
@@ -765,7 +990,11 @@ export default function Page() {
   /* Deep links from push notifications (?go=...) + SW focus messages. */
   useEffect(() => {
     const applyGo = (go: string | null) => {
-      if (go === "friends") setScreen("friends");
+      if (go === "friends") { setSocialTab("friends"); setScreen("social"); }
+      else if (go === "chat") { setSocialTab("chat"); setScreen("social"); }
+      else if (go === "social") setScreen("social");
+      else if (go === "arcade" || go === "moregames") setScreen("moregames");
+      else if (go === "me") setScreen("me");
       else if (go === "tournaments") setScreen("tournaments");
       else if (go === "dailycode") setScreen("dailycode");
       else if (go === "home") setScreen("home");
@@ -828,7 +1057,31 @@ export default function Page() {
   }
 
   if (screen === "welcome" || !me) {
-    return <Welcome doAuth={doAuth} showToast={showToast} toasts={toasts} />;
+    return (
+      <>
+        <Welcome doAuth={doAuth} showToast={showToast} toasts={toasts} />
+        {showInstallModal && (
+          <InstallAskModal
+            onInstall={startInstallFromUi}
+            onDismiss={dismissInstallModal}
+            onIos={() => { setShowInstallModal(false); setShowIosInstall(true); }}
+          />
+        )}
+        {showIosInstall && (
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="absolute inset-0 bg-black/45 animate-fade" onClick={() => setShowIosInstall(false)} />
+            <div className="relative card-game w-full sm:max-w-sm p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center">
+              <Character config={{ base: "owl", color: "classic", accessory: "crown" }} mood="happy" size={90} />
+              <h3 className="font-display font-bold text-xl mt-1">Install on iPhone/iPad</h3>
+              <p className="text-sm font-bold mt-1" style={{ color: "var(--ink-soft)" }}>
+                Apple only allows installing from Safari: tap the <b>Share</b> button, then <b>&ldquo;Add to Home Screen&rdquo;</b>. That&rsquo;s it — Cipher Clash becomes a real app icon!
+              </p>
+              <button onClick={() => setShowIosInstall(false)} className="btn-game btn-green w-full py-3 mt-4">Got it!</button>
+            </div>
+          </div>
+        )}
+      </>
+    );
   }
 
   if (screen === "spectate" && spectateRoom) {
@@ -882,6 +1135,24 @@ export default function Page() {
   const divProgress = next ? Math.min(100, ((me.trophies - div.minTrophies) / Math.max(1, next.minTrophies - div.minTrophies)) * 100) : 100;
   const myRank = leaderboard.findIndex((r) => r.id === me.id);
 
+  /* The bottom tab bar shows on the four main pages + secondary screens
+     (hidden while the arcade is running a game, and on full-screen modes). */
+  const showTabs = screen !== "moregames" || !arcadePlaying;
+  const socialBadge = incomingInvites.length + friendsOnline;
+  const goTab = (tab: TabId) => {
+    soundEngine.playTap(560);
+    if (tab === "social") setSocialTab("chat");
+    setScreen(tab);
+  };
+
+  /* Secondary screens highlight the tab they belong to. */
+  const TAB_OF_SCREEN: Partial<Record<Screen, TabId>> = {
+    home: "home", moregames: "moregames", social: "social", me: "me",
+    shop: "me", history: "me", rank: "social", dailycode: "home", tournaments: "home",
+  };
+  const activeTab = TAB_OF_SCREEN[screen] ?? "home";
+
+
   return (
     <div className="min-h-[100dvh]">
       {/* ---- HUD ---- */}
@@ -903,7 +1174,7 @@ export default function Page() {
           <span className="chip px-2.5 py-1.5 font-black text-sm flex items-center gap-1" title={`${me.streakDays}-day streak`}>
             <Flame size={16} className="animate-flame" style={{ color: "#FF7A18" }} fill="#FF7A18" /> {me.streakDays}
           </span>
-          <button onClick={() => setScreen("rank")} className="chip px-2.5 py-1.5 font-black text-sm flex items-center gap-1 active:scale-95 transition-transform" title="Trophies — view rankings">
+          <button onClick={() => openSecondary("rank")} className="chip px-2.5 py-1.5 font-black text-sm flex items-center gap-1 active:scale-95 transition-transform" title="Trophies — view rankings">
             <Trophy size={16} style={{ color: "#E0A800" }} /> {me.trophies.toLocaleString()}
           </button>
           <span className="chip px-2.5 py-1.5 font-black text-sm hidden sm:flex items-center gap-1" title="Coins">
@@ -912,7 +1183,7 @@ export default function Page() {
           <span className="chip px-2.5 py-1.5 font-black text-sm hidden sm:flex items-center gap-1" title="Gems">
             <Gem size={16} style={{ color: "#1CB0F6" }} /> {me.gems.toLocaleString()}
           </span>
-          <button onClick={() => setScreen("friends")} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center relative" title="Friends">
+          <button onClick={() => { setSocialTab("friends"); setScreen("social"); }} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center relative" title="Friends & chat">
             <Users size={17} strokeWidth={2.6} />
             {(friendsOnline > 0 || incomingInvites.length > 0) && (
               <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[9px] font-black flex items-center justify-center animate-pop" style={{ background: incomingInvites.length ? "#FF4B4B" : "#58CC02" }}>
@@ -929,8 +1200,19 @@ export default function Page() {
         </div>
       </header>
 
+      {/* offline banner — bot games, arcade, daily code & local WiFi all still work */}
+      {offline && (
+        <div className="sticky top-[52px] z-30 px-3 sm:px-5 pt-2" style={{ zIndex: 30 }}>
+          <div className="max-w-6xl mx-auto rounded-2xl px-3 py-2 flex items-center gap-2 font-bold text-xs"
+            style={{ background: "linear-gradient(120deg,#FF7A18,#FF4B4B)", color: "#fff", border: "2px solid rgba(255,255,255,0.35)", boxShadow: "var(--shadow-card)" }}>
+            <WifiOff size={16} strokeWidth={2.6} className="shrink-0" />
+            <span className="flex-1">You&rsquo;re offline — bots, the arcade, Daily Code &amp; local WiFi duels still work. Progress syncs when you reconnect!</span>
+          </div>
+        </div>
+      )}
+
       {screen === "home" && (
-        <main className="max-w-6xl mx-auto px-3 sm:px-5 py-4 pb-14">
+        <main className="max-w-6xl mx-auto px-3 sm:px-5 py-4 pb-32">
           {/* resume banner */}
           {roomResume && (
             <div className="card-game p-3 mb-3 flex items-center gap-3 animate-pop" style={{ borderColor: "var(--gold)" }}>
@@ -989,7 +1271,7 @@ export default function Page() {
                   <div><p className="font-display font-bold text-lg leading-none">{me.totalGames ? Math.round((me.wins / me.totalGames) * 100) : 0}%</p><p className="text-[10px] font-black" style={{ color: "var(--board-soft)" }}>WIN RATE</p></div>
                   <div><p className="font-display font-bold text-lg leading-none">{me.fastestWinTurns ?? "—"}</p><p className="text-[10px] font-black" style={{ color: "var(--board-soft)" }}>FASTEST</p></div>
                 </div>
-                <button onClick={() => setScreen("shop")} className="btn-game btn-purple px-5 py-2.5 mt-3 flex items-center gap-2 text-sm">
+                <button onClick={() => openSecondary("shop")} className="btn-game btn-purple px-5 py-2.5 mt-3 flex items-center gap-2 text-sm">
                   <ShoppingBag size={16} strokeWidth={2.6} /> Customize my character
                 </button>
               </div>
@@ -1003,25 +1285,28 @@ export default function Page() {
                 <Play size={30} strokeWidth={2.8} fill="#fff" /> PLAY
               </button>
 
-              {/* friends online */}
-              {token && socialFollowing && socialFollowing.some((f) => f.isOnline) && (
-                <div className="card-game p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-display font-semibold flex items-center gap-1.5"><Users size={17} style={{ color: "#58CC02" }} /> Friends online</h3>
-                    <button onClick={() => setScreen("friends")} className="text-xs font-black flex items-center gap-0.5" style={{ color: "var(--blue)" }}>All friends <ChevronRight size={13} strokeWidth={3} /></button>
+              {/* install banner — big & impossible to miss until installed */}
+              {!isStandalone && !installBannerClosed && (
+                <div className="rounded-3xl p-4 flex items-center gap-3 relative overflow-hidden"
+                  style={{ background: "linear-gradient(120deg,#14D4C5,#1CB0F6 55%,#7B5CFF)", color: "#fff", border: "2px solid rgba(255,255,255,0.4)", boxShadow: "var(--shadow-card)" }}>
+                  <span className="w-12 h-12 rounded-2xl flex items-center justify-center text-white shrink-0" style={{ background: "rgba(255,255,255,0.22)" }}>
+                    <Download size={24} strokeWidth={2.6} />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-display font-bold text-lg leading-tight">Install Cipher Clash!</p>
+                    <p className="text-xs font-bold" style={{ color: "rgba(255,255,255,0.92)" }}>
+                      Works 100% offline · launches instantly · full screen with its own icon.
+                    </p>
                   </div>
-                  <div className="flex gap-2 overflow-x-auto no-scrollbar pb-0.5">
-                    {socialFollowing.filter((f) => f.isOnline).slice(0, 10).map((f) => (
-                      <button key={f.id} onClick={() => setProfilePlayerId(f.id)} className="flex flex-col items-center shrink-0 w-[62px] active:scale-95 transition-transform">
-                        <span className="relative">
-                          <CharacterAvatar config={f.avatarConfig} frameId={f.frameId} size={48} ringWidth={3} />
-                          <span className="absolute bottom-0.5 right-0.5 w-3 h-3 rounded-full border-2 border-white" style={{ background: f.inMatchRoom ? "#FFC800" : "#58CC02" }} />
-                        </span>
-                        <span className="font-black text-[10px] mt-1 truncate w-full text-center">{f.username}</span>
-                        <span className="text-[8px] font-black uppercase tracking-wide" style={{ color: f.inMatchRoom ? "#E0A800" : "#58CC02" }}>{f.inMatchRoom ? "In match" : "Online"}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <button onClick={startInstallFromUi} className="btn-game px-4 py-2.5 shrink-0 text-sm font-black"
+                    style={{ background: "#fff", color: "#0E86C8", boxShadow: "0 4px 0 rgba(0,0,0,.25)" }}>
+                    Install
+                  </button>
+                  <button onClick={() => setInstallBannerClosed(true)} aria-label="Dismiss"
+                    className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center"
+                    style={{ background: "rgba(255,255,255,0.2)" }}>
+                    <X size={14} strokeWidth={3} />
+                  </button>
                 </div>
               )}
 
@@ -1130,35 +1415,6 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* menu grid */}
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                {[
-                  { label: "Shop", icon: ShoppingBag, color: "#A560E8", go: () => setScreen("shop") },
-                  { label: "More Games", icon: Gamepad2, color: "#FF4B6E", go: () => setScreen("moregames") },
-                  { label: "Friends", icon: UserPlus, color: "#58CC02", go: () => setScreen("friends") },
-                  { label: "Replays", icon: History, color: "#7B5CFF", go: () => setScreen("history") },
-                  { label: "Rankings", icon: Trophy, color: "#E0A800", go: () => setScreen("rank") },
-                  { label: "How to Play", icon: GraduationCap, color: "#1CB0F6", go: () => setShowTutorial(true) },
-                  { label: "Reviews", icon: Star, color: "#FFC800", go: () => { setCommunityTab("reviews"); setScreen("community"); } },
-                  { label: "Feedback", icon: MessageSquare, color: "#FF4B6E", go: () => { setCommunityTab("feedback"); setScreen("community"); } },
-                  { label: "Lobby Chat", icon: Users, color: "#58CC02", go: () => { setCommunityTab("lobby"); setScreen("community"); } },
-                  { label: "My Profile", icon: User, color: "#FF7A18", go: () => setShowProfile(true) },
-                  ...(installEvt && !isStandalone ? [{ label: "Install App", icon: Download, color: "#14D4C5", go: installApp }] : []),
-                  ...(me.isAdmin ? [{ label: "Admin", icon: Crown, color: "#E85D04", go: () => { setCommunityTab("admin"); setScreen("community"); } }] : []),
-                ].map((m) => {
-                  const Icon = m.icon;
-                  return (
-                    <button key={m.label} onClick={() => { soundEngine.playTap(520); m.go(); }}
-                      className="card-game p-3 flex flex-col items-center gap-1.5 active:scale-95 transition-transform hover:-translate-y-0.5">
-                      <span className="w-11 h-11 rounded-2xl flex items-center justify-center text-white" style={{ background: m.color }}>
-                        <Icon size={21} strokeWidth={2.5} />
-                      </span>
-                      <span className="font-display font-semibold text-[13px] leading-none">{m.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
               {session?.isGuest && (
                 <div className="rounded-2xl p-3 flex items-center gap-3" style={{ background: "linear-gradient(135deg,#1CB0F6,#7B5CFF)", color: "#fff" }}>
                   <Sparkles size={26} className="shrink-0" />
@@ -1167,69 +1423,76 @@ export default function Page() {
                 </div>
               )}
 
-              {/* mini leaderboard */}
-              {leaderboard.length > 0 && (
-                <div className="card-game p-3.5">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-display font-semibold flex items-center gap-1.5"><Trophy size={17} style={{ color: "#E0A800" }} /> Top code breakers</h3>
-                    <button onClick={() => setScreen("rank")} className="text-xs font-black flex items-center gap-0.5" style={{ color: "var(--blue)" }}>See all <ChevronRight size={13} strokeWidth={3} /></button>
-                  </div>
-                  <div className="space-y-1.5">
-                    {leaderboard.slice(0, 5).map((r, i) => (
-                      <button key={r.id} type="button" onClick={() => { if (r.id !== me.id) setProfilePlayerId(r.id); }}
-                        className="flex items-center gap-2 px-2 py-1.5 rounded-xl w-full text-left active:scale-[0.99] transition-transform" style={{ background: r.id === me.id ? "rgba(88,204,2,0.14)" : "var(--surface-3)" }}>
-                        <span className="font-display font-bold w-6 text-center" style={{ color: i === 0 ? "#E0A800" : "var(--ink-soft)" }}>{i + 1}</span>
-                        <CharacterAvatar config={r.avatarConfig} frameId={r.frameId} size={32} ringWidth={2} />
-                        <span className="font-black text-sm flex-1 truncate">{r.username}</span>
-                        <DivisionBadge trophies={r.trophies} size="sm" />
-                        <span className="font-black text-sm flex items-center gap-1"><Trophy size={13} style={{ color: "#E0A800" }} />{r.trophies}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <Credits />
+              <p className="text-center text-[10px] font-bold pb-2" style={{ color: "var(--ink-faint)" }}>
+                Cipher Clash v4 — hide your code, crack theirs, become a Legend.
+              </p>
             </div>
           </div>
-
-          <p className="text-center text-[11px] font-bold mt-8" style={{ color: "var(--ink-faint)" }}>
-            Cipher Clash v4 — hide your code, crack theirs, become a Legend.
-          </p>
         </main>
       )}
 
       {screen === "shop" && (
-        <Shop me={me} onBack={() => setScreen("home")} onBuy={handleBuy} onEquip={handleEquip} busyId={busyItem} />
+        <Shop me={me} onBack={goBack} onBuy={handleBuy} onEquip={handleEquip} busyId={busyItem} />
       )}
 
       {screen === "rank" && (
-        <RankScreen leaderboard={leaderboard} me={me} onBack={() => setScreen("home")} onRefresh={refreshState} onOpenPlayer={(id) => setProfilePlayerId(id)} />
+        <RankScreen leaderboard={leaderboard} me={me} onBack={goBack} onRefresh={refreshState} onOpenPlayer={(id) => setProfilePlayerId(id)} />
       )}
 
-      {screen === "community" && (
-        <Community me={me} token={token} onBack={() => setScreen("home")} showToast={showToast} initialTab={communityTab} />
+      {screen === "social" && (
+        <SocialPage
+          me={me}
+          token={token}
+          leaderboard={leaderboard}
+          showToast={showToast}
+          tab={socialTab}
+          setTab={setSocialTab}
+          isAdmin={!!me.isAdmin}
+          pushSupported={pushSupported}
+          pushOn={pushOn}
+          onEnablePush={() => { void togglePush(); }}
+          onGoRank={() => openSecondary("rank")}
+          onOpenPlayer={(id) => setProfilePlayerId(id)}
+          onSpectate={startSpectate}
+          onEnterRoom={(room) => enterOnline(room)}
+          friendsOnline={friendsOnline}
+          inviteCount={incomingInvites.length}
+        />
       )}
 
-      {screen === "friends" && (
-        <Friends me={me} token={token} leaderboard={leaderboard} onBack={() => setScreen("home")} showToast={showToast}
-          onOpenPlayer={(id) => setProfilePlayerId(id)} onSpectate={startSpectate}
-          onEnterRoom={(room) => enterOnline(room)} />
+      {screen === "me" && (
+        <MePage
+          me={me}
+          rank={myRank >= 0 ? myRank + 1 : null}
+          isGuest={!!session?.isGuest}
+          onCustomize={() => openSecondary("shop")}
+          onReplays={() => openSecondary("history")}
+          onLeaderboard={() => openSecondary("rank")}
+          onTutorial={() => setShowTutorial(true)}
+          onOpenSettings={() => setShowSettings(true)}
+          onOpenProfile={() => setShowProfile(true)}
+          onInstall={installEvt || !isStandalone ? startInstallFromUi : undefined}
+          canInstall={!isStandalone}
+          onLogout={logout}
+        />
       )}
 
       {screen === "history" && (
-        <MatchHistory me={me} token={token} onBack={() => setScreen("home")} />
+        <MatchHistory me={me} token={token} onBack={goBack} />
       )}
 
       {screen === "dailycode" && (
-        <DailyCode me={me} token={token} onBack={() => setScreen("home")} showToast={showToast}
+        <DailyCode me={me} token={token} onBack={goBack} showToast={showToast}
           onPlayerUpdate={(p) => setMe({ ...p, avatarConfig: normalizeAvatar(p.avatarConfig) })} onGuestDaily={handleGuestDaily} />
       )}
 
       {screen === "tournaments" && (
-        <Tournament me={me} token={token} onBack={() => setScreen("home")} showToast={showToast} onRefresh={refreshState} />
+        <Tournament me={me} token={token} onBack={goBack} showToast={showToast} onRefresh={refreshState} />
       )}
 
       {screen === "moregames" && (
-        <MoreGames onBack={() => setScreen("home")} />
+        <MoreGames onBack={() => setScreen("home")} insetBottom={!arcadePlaying ? 92 : 0} onPlayingChange={setArcadePlaying} />
       )}
 
       {showPlaySheet && (
@@ -1281,7 +1544,7 @@ export default function Page() {
               <button onClick={() => { setShowSettings(false); setShowTutorial(true); }} className="btn-game btn-ghost w-full py-3 px-4 flex items-center gap-3">
                 <GraduationCap size={19} /> Replay how-to-play guide
               </button>
-              <button onClick={() => { setShowSettings(false); setCommunityTab("feedback"); setScreen("community"); }} className="btn-game btn-ghost w-full py-3 px-4 flex items-center gap-3">
+              <button onClick={() => { setShowSettings(false); setSocialTab("feedback"); setScreen("social"); }} className="btn-game btn-ghost w-full py-3 px-4 flex items-center gap-3">
                 <MessageSquare size={19} /> Send feedback
               </button>
               <button onClick={logout} className="btn-game btn-red w-full py-3 px-4 flex items-center gap-3">
@@ -1326,6 +1589,23 @@ export default function Page() {
 
       {incomingInvites.length > 0 && (
         <InvitePopup invite={incomingInvites[0]} onAnswer={answerInvite} />
+      )}
+
+      {showTabs && <TabBar active={activeTab} onGo={goTab} socialBadge={socialBadge} />}
+
+      {showInstallModal && (
+        <InstallAskModal
+          onInstall={startInstallFromUi}
+          onDismiss={dismissInstallModal}
+          onIos={() => { setShowInstallModal(false); setShowIosInstall(true); }}
+        />
+      )}
+
+      {showNotifAsk && (
+        <NotifAskModal
+          onEnable={() => { void enablePushFromUi(); }}
+          onDismiss={() => { setShowNotifAsk(false); soundEngine.playTap(420); }}
+        />
       )}
 
       <Toasts toasts={toasts} />
@@ -1453,6 +1733,10 @@ function Welcome({ doAuth, showToast, toasts }: {
           <p className="text-[11px] font-bold text-center mt-2" style={{ color: "var(--ink-faint)" }}>
             An account saves your trophies, streak &amp; character on every device.
           </p>
+        </div>
+
+        <div className="mt-6">
+          <Credits />
         </div>
       </div>
       <Toasts toasts={toasts} />
@@ -1764,6 +2048,8 @@ function RankScreen({ leaderboard, me, onBack, onRefresh, onOpenPlayer }: {
           </div>
         ))}
       </div>
+
+      <Credits />
     </div>
   );
 }
@@ -1849,6 +2135,382 @@ function ProfileModal({ me, rank, onClose, onCustomize, onLogout, isGuest }: {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------- Bottom tab bar (the 4 pages) ------------------------------- */
+
+const MAIN_TABS: { id: TabId; label: string; icon: React.ElementType; color: string }[] = [
+  { id: "home", label: "Play", icon: Swords, color: "#58CC02" },
+  { id: "moregames", label: "Arcade", icon: Joystick, color: "#FF4B6E" },
+  { id: "social", label: "Social", icon: MessageCircle, color: "#1CB0F6" },
+  { id: "me", label: "Me", icon: User, color: "#FF7A18" },
+];
+
+function TabBar({ active, onGo, socialBadge }: { active: TabId; onGo: (t: TabId) => void; socialBadge: number }) {
+  return (
+    <nav className="fixed inset-x-0 z-[75]" style={{ bottom: 0, pointerEvents: "none" }} aria-label="Main pages">
+      <div className="max-w-6xl mx-auto px-2 sm:px-4" style={{ paddingBottom: "max(6px, env(safe-area-inset-bottom))", pointerEvents: "auto" }}>
+        <div className="card-game rounded-t-[1.4rem] sm:rounded-[1.4rem] sm:mb-1.5 grid grid-cols-4 gap-0.5 p-1.5"
+          style={{ borderTop: "2.5px solid var(--border-strong)", boxShadow: "0 -8px 30px rgba(0,0,0,0.16), var(--shadow-card)" }}>
+          {MAIN_TABS.map((t) => {
+            const Icon = t.icon;
+            const isActive = active === t.id;
+            const showBadge = t.id === "social" && socialBadge > 0;
+            return (
+              <button key={t.id} onClick={() => onGo(t.id)} aria-current={isActive ? "page" : undefined}
+                className="relative flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-2xl active:scale-95 transition-transform"
+                style={isActive ? { background: "rgba(88,204,2,0.14)", border: "2px solid var(--brand)" } : { border: "2px solid transparent" }}>
+                <Icon size={20} strokeWidth={isActive ? 2.9 : 2.2} style={{ color: isActive ? t.color : "var(--ink-faint)" }} />
+                <span className="font-display font-bold text-[10px] leading-none" style={{ color: isActive ? t.color : "var(--ink-faint)" }}>
+                  {t.label}
+                </span>
+                {showBadge && (
+                  <span className="absolute top-0.5 right-[18%] min-w-[18px] h-[18px] px-1 rounded-full text-white text-[9px] font-black flex items-center justify-center animate-pop"
+                    style={{ background: "#FF4B4B", border: "2px solid #fff" }}>
+                    {socialBadge > 9 ? "9+" : socialBadge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+/* ------------------------------- Install ask modal ------------------------------- */
+
+function InstallAskModal({ onInstall, onDismiss, onIos }: {
+  onInstall: () => void;
+  onDismiss: () => void;
+  onIos: () => void;
+}) {
+  const isIOS = typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(navigator.userAgent);
+  return (
+    <div className="fixed inset-0 z-[88] flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="absolute inset-0 bg-black/55 animate-fade" onClick={onDismiss} />
+      <div className="relative card-game w-full sm:max-w-md p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center overflow-hidden">
+        <div className="absolute -top-12 -right-12 w-40 h-40 rounded-full opacity-20" style={{ background: "#14D4C5" }} />
+        <div className="relative flex justify-center">
+          <Character config={{ base: "owl", color: "classic", accessory: "crown" }} mood="happy" size={110} />
+        </div>
+        <h3 className="font-display font-bold text-2xl mt-1 relative">Install the app? 📲</h3>
+        <p className="font-bold text-sm mt-1 relative" style={{ color: "var(--ink-soft)" }}>
+          Get Cipher Clash on your home screen — it&rsquo;s faster, full screen, and works even with <b>no internet</b>.
+        </p>
+        <div className="grid grid-cols-3 gap-1.5 mt-3 text-center">
+          {[
+            { icon: WifiOff, label: "Works offline" },
+            { icon: Zap, label: "Instant launch" },
+            { icon: Download, label: "Real app icon" },
+          ].map((f) => {
+            const Icon = f.icon;
+            return (
+              <div key={f.label} className="rounded-2xl py-2.5 px-1" style={{ background: "var(--surface-3)", border: "2px solid var(--border)" }}>
+                <Icon size={19} strokeWidth={2.5} className="mx-auto" style={{ color: "#1CB0F6" }} />
+                <p className="text-[10px] font-black mt-1" style={{ color: "var(--ink-soft)" }}>{f.label}</p>
+              </div>
+            );
+          })}
+        </div>
+        <button onClick={isIOS ? onIos : onInstall} className="btn-game btn-green w-full py-4 text-lg mt-4 flex items-center justify-center gap-2">
+          <Download size={21} strokeWidth={2.7} /> {isIOS ? "Show me how (iPhone)" : "Yes — install it!"}
+        </button>
+        <button onClick={onDismiss} className="btn-game btn-ghost w-full py-2.5 mt-2 text-sm">Not now</button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------- Notifications ask modal ------------------------------- */
+
+function NotifAskModal({ onEnable, onDismiss }: { onEnable: () => void; onDismiss: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[88] flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="absolute inset-0 bg-black/55 animate-fade" onClick={onDismiss} />
+      <div className="relative card-game w-full sm:max-w-md p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center overflow-hidden">
+        <div className="absolute -top-12 -left-12 w-40 h-40 rounded-full opacity-20" style={{ background: "#FFC800" }} />
+        <div className="relative flex justify-center">
+          <span className="w-24 h-24 rounded-full flex items-center justify-center text-white animate-flame" style={{ background: "linear-gradient(135deg,#FFC800,#FF7A18)" }}>
+            <Bell size={44} strokeWidth={2.2} fill="#fff" />
+          </span>
+        </div>
+        <h3 className="font-display font-bold text-2xl mt-2 relative">Never miss a challenge! 🔔</h3>
+        <p className="font-bold text-sm mt-1 relative" style={{ color: "var(--ink-soft)" }}>
+          Turn on notifications and we&rsquo;ll ping you the moment a friend challenges you — plus streak reminders so you never lose your flame.
+        </p>
+        <button onClick={onEnable} className="btn-game btn-gold w-full py-4 text-lg mt-4 flex items-center justify-center gap-2">
+          <Bell size={21} strokeWidth={2.7} fill="#fff" /> Turn on notifications
+        </button>
+        <button onClick={onDismiss} className="btn-game btn-ghost w-full py-2.5 mt-2 text-sm">Not now</button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------- Social page (chat-first) ------------------------------- */
+
+function SocialPage({ me, token, leaderboard, showToast, tab, setTab, isAdmin, pushSupported, pushOn, onEnablePush, onGoRank, onOpenPlayer, onSpectate, onEnterRoom, friendsOnline, inviteCount }: {
+  me: Player;
+  token: string | null;
+  leaderboard: LeaderboardRow[];
+  showToast: (m: string, k?: "ok" | "err") => void;
+  tab: SocialTab;
+  setTab: (t: SocialTab) => void;
+  isAdmin: boolean;
+  pushSupported: boolean;
+  pushOn: boolean;
+  onEnablePush: () => void;
+  onGoRank: () => void;
+  onOpenPlayer: (id: number) => void;
+  onSpectate: (roomCode: string) => void;
+  onEnterRoom: (room: RoomSession & { timerSeconds?: number }) => void;
+  friendsOnline: number;
+  inviteCount: number;
+}) {
+  const tabs: SocialTab[] = [...SOCIAL_TABS.map((t) => t.id), ...(isAdmin ? (["admin"] as SocialTab[]) : [])];
+  const communityInitial: Record<Exclude<SocialTab, "friends">, "lobby" | "reviews" | "feedback" | "admin"> = {
+    chat: "lobby", reviews: "reviews", feedback: "feedback", admin: "admin",
+  };
+  return (
+    <div className="max-w-4xl mx-auto px-3 sm:px-5 pt-4 pb-32 animate-fade">
+      <div className="flex items-center gap-2.5 mb-3">
+        <span className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shrink-0" style={{ background: "linear-gradient(135deg,#1CB0F6,#7B5CFF)" }}>
+          <MessageCircle size={23} strokeWidth={2.5} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <h2 className="font-display font-bold text-2xl leading-tight">Social &amp; Chat</h2>
+          <p className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>
+            Talk, challenge friends &amp; climb together — this is your hangout.
+          </p>
+        </div>
+        {(friendsOnline > 0 || inviteCount > 0) && (
+          <span className="chip px-2.5 py-1.5 text-[11px] font-black flex items-center gap-1">
+            <Users size={13} style={{ color: "#58CC02" }} /> {inviteCount > 0 ? `${inviteCount} invite${inviteCount > 1 ? "s" : ""}!` : `${friendsOnline} online`}
+          </span>
+        )}
+      </div>
+
+      {/* notifications CTA — catch challenges the moment they happen */}
+      {pushSupported && token && !pushOn && (
+        <button onClick={onEnablePush} className="w-full rounded-2xl p-3 mb-3 flex items-center gap-3 text-left active:scale-[0.98] transition-transform"
+          style={{ background: "linear-gradient(135deg,#FFC800,#FF7A18)", color: "#fff", border: "2px solid rgba(255,255,255,0.4)", boxShadow: "var(--shadow-card)" }}>
+          <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "rgba(255,255,255,0.25)" }}>
+            <Bell size={20} strokeWidth={2.6} fill="#fff" />
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="font-display font-semibold block leading-tight">Turn on notifications</span>
+            <span className="text-[11px] font-bold block" style={{ color: "rgba(255,255,255,0.95)" }}>Get alerted the second a friend challenges you!</span>
+          </span>
+          <ChevronRight size={18} strokeWidth={3} />
+        </button>
+      )}
+
+      {/* tab strip */}
+      <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-3">
+        {tabs.map((t) => {
+          const meta = SOCIAL_TABS.find((s) => s.id === t);
+          const label = meta?.label ?? "Admin";
+          const active = tab === t;
+          return (
+            <button key={t} onClick={() => { setTab(t); soundEngine.playTap(500); }}
+              className={`btn-game px-4 py-2.5 whitespace-nowrap text-sm flex items-center gap-1.5 ${active ? "btn-blue" : "btn-ghost"}`}>
+              {t === "chat" && <MessageCircle size={15} strokeWidth={2.6} />}
+              {t === "friends" && <Users size={15} strokeWidth={2.6} />}
+              {t === "reviews" && <Star size={15} strokeWidth={2.6} />}
+              {t === "feedback" && <MessageSquare size={15} strokeWidth={2.6} />}
+              {t === "admin" && <Shield size={15} strokeWidth={2.6} />}
+              {label}
+              {t === "friends" && friendsOnline > 0 && (
+                <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#58CC02] text-white text-[10px] font-black flex items-center justify-center">{friendsOnline}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "friends" ? (
+        <Friends
+          me={me}
+          token={token}
+          leaderboard={leaderboard}
+          onBack={() => undefined}
+          showToast={showToast}
+          onOpenPlayer={onOpenPlayer}
+          onSpectate={onSpectate}
+          onEnterRoom={onEnterRoom}
+          showHeader={false}
+        />
+      ) : (
+        <Community
+          key={tab}
+          me={me}
+          token={token}
+          onBack={() => undefined}
+          showToast={showToast}
+          initialTab={communityInitial[tab as Exclude<SocialTab, "friends">]}
+          showHeader={false}
+          showTabs={false}
+        />
+      )}
+
+      {/* leaderboard bridge */}
+      <button onClick={onGoRank} className="card-game w-full p-3.5 mt-4 flex items-center gap-3 text-left active:scale-[0.98] transition-transform">
+        <span className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shrink-0" style={{ background: "linear-gradient(135deg,#FFC800,#E0A800)" }}>
+          <Trophy size={21} strokeWidth={2.6} />
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="font-display font-semibold block leading-tight">Leaderboard</span>
+          <span className="text-[11px] font-bold block" style={{ color: "var(--ink-soft)" }}>See the top code breakers &amp; your rank this season</span>
+        </span>
+        <ChevronRight size={18} style={{ color: "var(--ink-faint)" }} />
+      </button>
+
+      <Credits />
+    </div>
+  );
+}
+
+/* ------------------------------- Me page ------------------------------- */
+
+function MePage({ me, rank, isGuest, onCustomize, onReplays, onLeaderboard, onTutorial, onOpenSettings, onOpenProfile, onInstall, canInstall, onLogout }: {
+  me: Player;
+  rank: number | null;
+  isGuest: boolean;
+  onCustomize: () => void;
+  onReplays: () => void;
+  onLeaderboard: () => void;
+  onTutorial: () => void;
+  onOpenSettings: () => void;
+  onOpenProfile: () => void;
+  onInstall: (() => void) | undefined;
+  canInstall: boolean;
+  onLogout: () => void;
+}) {
+  const winRate = me.totalGames ? Math.round((me.wins / me.totalGames) * 100) : 0;
+  const div = getDivisionForTrophies(me.trophies);
+  const next = nextDivision(me.trophies);
+  const divProgress = next ? Math.min(100, ((me.trophies - div.minTrophies) / Math.max(1, next.minTrophies - div.minTrophies)) * 100) : 100;
+
+  return (
+    <div className="max-w-3xl mx-auto px-3 sm:px-5 pt-4 pb-32 animate-fade">
+      {/* profile card */}
+      <div className="board-theme rounded-3xl border-2 p-4 relative overflow-hidden" data-board={me.themeId} style={{ borderColor: "var(--board-border)" }}>
+        <button onClick={onOpenSettings} className="absolute top-3 right-3 btn-game w-9 h-9 !rounded-xl flex items-center justify-center"
+          style={{ background: "var(--board-key)", color: "var(--board-ink)", border: "2px solid var(--board-border)", boxShadow: "0 3px 0 var(--board-border)" }} title="Settings">
+          <Settings size={17} strokeWidth={2.6} />
+        </button>
+        <div className="flex flex-col items-center text-center">
+          <button onClick={onOpenProfile} className="active:scale-95 transition-transform" title="View full profile">
+            <CharacterAvatar config={me.avatarConfig} frameId={me.frameId} size={120} ringWidth={5} mood="happy" />
+          </button>
+          <h2 className="font-display font-bold text-2xl mt-1" style={{ color: "var(--board-ink)" }}>{me.username}</h2>
+          <p className="text-[11px] font-black uppercase tracking-widest" style={{ color: "var(--board-soft)" }}>{me.title}{isGuest ? " · Guest" : ""}</p>
+          <div className="flex items-center gap-2 mt-2 flex-wrap justify-center">
+            <DivisionBadge trophies={me.trophies} />
+            {rank && <span className="chip px-2 py-1 text-[11px] font-black">Rank #{rank}</span>}
+            <span className="chip px-2 py-1 text-[11px] font-black flex items-center gap-1">
+              <Flame size={12} style={{ color: "#FF7A18" }} fill="#FF7A18" /> {me.streakDays} days
+            </span>
+          </div>
+          {next && (
+            <div className="w-full max-w-[240px] mt-3">
+              <div className="h-3 rounded-full overflow-hidden" style={{ background: "rgba(0,0,0,0.14)", border: "2px solid var(--board-border)" }}>
+                <div className="h-full rounded-full transition-all" style={{ width: `${divProgress}%`, background: div.gradient }} />
+              </div>
+              <p className="text-[10px] font-black mt-0.5" style={{ color: "var(--board-soft)" }}>{next.minTrophies - me.trophies} trophies to {next.name}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* stats */}
+      <div className="grid grid-cols-4 gap-2 text-center mt-3">
+        {[
+          { v: me.trophies, l: "Trophies" }, { v: me.wins, l: "Wins" },
+          { v: `${winRate}%`, l: "Win rate" }, { v: me.level, l: "Level" },
+          { v: me.totalGames, l: "Games" }, { v: me.losses, l: "Losses" },
+          { v: me.fastestWinTurns ?? "—", l: "Fastest win" }, { v: me.xp, l: "Total XP" },
+        ].map((s) => (
+          <div key={s.l} className="rounded-2xl py-2.5 px-1" style={{ background: "var(--surface-3)", border: "2px solid var(--border)" }}>
+            <p className="font-display font-bold text-lg leading-none">{s.v}</p>
+            <p className="text-[9px] font-black uppercase tracking-wide mt-1" style={{ color: "var(--ink-faint)" }}>{s.l}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-2 mt-3">
+        <span className="chip flex-1 py-2.5 font-black flex items-center justify-center gap-1.5"><Coins size={17} style={{ color: "#E0A800" }} /> {me.coins.toLocaleString()} coins</span>
+        <span className="chip flex-1 py-2.5 font-black flex items-center justify-center gap-1.5"><Gem size={17} style={{ color: "#1CB0F6" }} /> {me.gems.toLocaleString()} gems</span>
+      </div>
+
+      {/* actions */}
+      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-3">
+        {[
+          { label: "Customize", icon: ShoppingBag, color: "#A560E8", go: onCustomize },
+          { label: "Replays", icon: History, color: "#7B5CFF", go: onReplays },
+          { label: "Rankings", icon: Trophy, color: "#E0A800", go: onLeaderboard },
+          { label: "How to Play", icon: GraduationCap, color: "#1CB0F6", go: onTutorial },
+          { label: "Settings", icon: Settings, color: "#8A97AD", go: onOpenSettings },
+          { label: "Profile", icon: User, color: "#FF7A18", go: onOpenProfile },
+          ...(canInstall && onInstall ? [{ label: "Install App", icon: Download, color: "#14D4C5", go: onInstall }] : []),
+        ].map((m) => {
+          const Icon = m.icon;
+          return (
+            <button key={m.label} onClick={() => { soundEngine.playTap(520); m.go(); }}
+              className="card-game p-3 flex flex-col items-center gap-1.5 active:scale-95 transition-transform hover:-translate-y-0.5">
+              <span className="w-11 h-11 rounded-2xl flex items-center justify-center text-white" style={{ background: m.color }}>
+                <Icon size={21} strokeWidth={2.5} />
+              </span>
+              <span className="font-display font-semibold text-[13px] leading-none">{m.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {isGuest && (
+        <div className="rounded-2xl p-3 flex items-center gap-3 mt-3" style={{ background: "linear-gradient(135deg,#1CB0F6,#7B5CFF)", color: "#fff" }}>
+          <Sparkles size={24} className="shrink-0" />
+          <p className="font-bold text-sm flex-1">You&rsquo;re a guest — create a free account to keep this progress forever!</p>
+          <button onClick={onLogout} className="btn-game px-3.5 py-2 text-sm shrink-0" style={{ background: "#fff", color: "#2456E6", boxShadow: "0 4px 0 rgba(0,0,0,.25)" }}>Sign up</button>
+        </div>
+      )}
+
+      {/* achievements */}
+      <div className="mt-4">
+        <h3 className="font-display font-semibold mb-2 flex items-center gap-1.5">
+          <Medal size={17} style={{ color: "#E0A800" }} /> Achievements ({me.completedAchievements.length}/{ACHIEVEMENTS.length})
+        </h3>
+        <div className="grid grid-cols-2 gap-1.5">
+          {ACHIEVEMENTS.map((a) => {
+            const has = me.completedAchievements.includes(a.id);
+            return (
+              <div key={a.id} className="rounded-2xl p-2.5 flex items-start gap-2" style={{
+                background: has ? "rgba(255,200,0,0.14)" : "var(--surface-3)",
+                border: `2px solid ${has ? "#FFC800" : "var(--border)"}`, opacity: has ? 1 : 0.65,
+              }}>
+                <span className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-white" style={{ background: has ? "#E0A800" : "var(--border-strong)" }}>
+                  {has ? <Medal size={17} strokeWidth={2.5} /> : <Lock size={15} />}
+                </span>
+                <span className="min-w-0">
+                  <span className="font-black text-[12px] block leading-tight">{a.title}</span>
+                  <span className="text-[10px] font-bold block leading-tight" style={{ color: "var(--ink-soft)" }}>{a.description}</span>
+                  <span className="text-[10px] font-black flex items-center gap-0.5" style={{ color: "#1CB0F6" }}>+{a.rewardGems} <Gem size={10} /></span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <button onClick={onLogout} className="btn-game btn-ghost w-full py-3 mt-4 flex items-center justify-center gap-2">
+        <LogOut size={18} strokeWidth={2.6} /> {isGuest ? "Exit guest mode" : "Log out"}
+      </button>
+
+      <Credits />
     </div>
   );
 }

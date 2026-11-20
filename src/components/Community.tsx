@@ -32,12 +32,16 @@ function Stars({ value, onPick, size = 26 }: { value: number; onPick?: (v: numbe
 
 export default function Community({
   me, token, onBack, showToast, initialTab = "reviews",
+  showHeader = true, showTabs = true,
 }: {
   me: Player;
   token: string | null;
   onBack: () => void;
   showToast: (m: string, k?: "ok" | "err") => void;
   initialTab?: "reviews" | "feedback" | "lobby" | "admin";
+  /** Embedded mode (Social hub): hide the screen header and/or tab strip. */
+  showHeader?: boolean;
+  showTabs?: boolean;
 }) {
   const [tab, setTab] = useState<"reviews" | "feedback" | "lobby" | "admin">(initialTab);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -188,19 +192,23 @@ export default function Community({
 
   return (
     <div className="max-w-4xl mx-auto px-3 sm:px-5 pb-16 animate-fade">
-      <div className="flex items-center gap-2 py-3 sticky top-0 z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
-        <button onClick={onBack} className="btn-game btn-ghost w-10 h-10 !rounded-xl flex items-center justify-center" aria-label="Back">
-          <ArrowLeft size={19} strokeWidth={2.8} />
-        </button>
-        <h2 className="font-display font-bold text-2xl flex-1">Community</h2>
-      </div>
+      {showHeader && (
+        <div className="flex items-center gap-2 py-3 sticky top-0 z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
+          <button onClick={onBack} className="btn-game btn-ghost w-10 h-10 !rounded-xl flex items-center justify-center" aria-label="Back">
+            <ArrowLeft size={19} strokeWidth={2.8} />
+          </button>
+          <h2 className="font-display font-bold text-2xl flex-1">Community</h2>
+        </div>
+      )}
 
-      <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-4">
-        {tabBtn("reviews", "Reviews", Star)}
-        {tabBtn("feedback", "Send Feedback", MessageSquare)}
-        {tabBtn("lobby", "Lobby Chat", MessageCircle)}
-        {me.isAdmin && tabBtn("admin", "Admin", ShieldCheck, pending.length)}
-      </div>
+      {showTabs && (
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-4">
+          {tabBtn("reviews", "Reviews", Star)}
+          {tabBtn("feedback", "Send Feedback", MessageSquare)}
+          {tabBtn("lobby", "Lobby Chat", MessageCircle)}
+          {me.isAdmin && tabBtn("admin", "Admin", ShieldCheck, pending.length)}
+        </div>
+      )}
 
       {tab === "reviews" && (
         <div className="space-y-4">

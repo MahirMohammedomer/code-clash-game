@@ -6,6 +6,7 @@ import { CharacterAvatar } from "./Character";
 import Replay from "./Replay";
 import { loadLocalHistory } from "@/lib/history";
 import type { HistoryEntry, Player } from "@/lib/types";
+import Credits from "@/components/Credits";
 
 const MODE_LABELS: Record<string, string> = {
   ai: "🤖 Vs Bot",
@@ -98,6 +99,8 @@ export default function MatchHistory({
       )}
 
       {selected && <Replay entry={selected} me={me} onClose={() => setSelected(null)} />}
+
+      <Credits />
     </div>
   );
 }

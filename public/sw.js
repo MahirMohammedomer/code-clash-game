@@ -1,15 +1,27 @@
-/* Cipher Clash service worker — built for bad networks:
+/* Cipher Clash service worker — built for bad networks & FULL offline play:
    - Pages: stale-while-revalidate (cached copy shows INSTANTLY, fresh
      copy downloads in the background for next time).
    - Bundled arcade games (/games/*), thumbnails & build assets:
      cache-first — after the first play they load instantly, fully offline.
-   - APIs: network only (never serve stale game data).
+   - APIs: network only (never serve stale game data) with a JSON offline
+     response so the app can show friendly offline states.
+   - The app "warms" the offline cache after every online visit by sending
+     every URL it loaded (CACHE_URLS message) — so after ONE online session
+     the whole app, every tab and every arcade game works with zero network.
    Bump VERSION to ship updates. */
-const VERSION = "cipher-clash-v8";
+const VERSION = "cipher-clash-v9";
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 
-const PRECACHE = ["/", "/manifest.json", "/icon-192.png", "/icon-512.png"];
+const PRECACHE = [
+  "/",
+  "/manifest.json",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/icon-maskable-512.png",
+  "/apple-touch-icon.png",
+  "/favicon-64.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -58,13 +70,47 @@ function cacheFirst(request, cacheName) {
   );
 }
 
+/** Cache a batch of URLs the app reports as loaded (offline warm-up). */
+async function cacheUrls(urls) {
+  const cache = await caches.open(STATIC_CACHE);
+  const pageCache = await caches.open(PAGE_CACHE);
+  await Promise.all(
+    urls.map(async (raw) => {
+      try {
+        const url = new URL(raw, self.location.origin);
+        if (url.origin !== self.location.origin) return;
+        if (url.pathname.startsWith("/api/")) return;
+        const target = /\.(png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf|otf|mp3|wav|ogg)$/.test(url.pathname) ||
+          url.pathname.startsWith("/games/") ||
+          url.pathname.startsWith("/arcade/") ||
+          url.pathname.startsWith("/_next/static/")
+          ? cache
+          : pageCache;
+        const hit = await target.match(url.href);
+        if (hit) return;
+        const res = await fetch(url.href, { cache: "no-cache" }).catch(() => null);
+        if (res && (res.status === 200 || res.type === "opaque")) target.put(url.href, res);
+      } catch {}
+    })
+  );
+}
+
+self.addEventListener("message", (event) => {
+  const data = event.data || {};
+  if (data.type === "CACHE_URLS" && Array.isArray(data.urls)) {
+    event.waitUntil(cacheUrls(data.urls));
+  } else if (data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // APIs: network only (never serve stale game data)
+  // APIs: network only (never serve stale game data) — offline gets clean JSON.
   if (url.pathname.startsWith("/api/")) {
     event.respondWith(
       fetch(request).catch(

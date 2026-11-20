@@ -8,6 +8,7 @@ import { fireWinEffect } from "@/lib/win-effects";
 import { Character, CharacterAvatar } from "./Character";
 import type { Player } from "@/lib/types";
 import { soundEngine } from "@/lib/sound-effects";
+import Credits from "@/components/Credits";
 
 type Tab = "character" | "frame" | "theme" | "effect" | "title";
 
@@ -262,6 +263,8 @@ export default function Shop({
           </div>
         </div>
       )}
+
+      <Credits />
     </div>
   );
 }

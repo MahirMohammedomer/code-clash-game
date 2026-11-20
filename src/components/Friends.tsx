@@ -18,6 +18,7 @@ export default function Friends({
   onOpenPlayer,
   onSpectate,
   onEnterRoom,
+  showHeader = true,
 }: {
   me: Player;
   token: string | null;
@@ -27,6 +28,8 @@ export default function Friends({
   onOpenPlayer: (id: number) => void;
   onSpectate: (roomCode: string) => void;
   onEnterRoom: (room: RoomSession & { timerSeconds?: number }) => void;
+  /** Embedded mode (Social hub): hide the screen header. */
+  showHeader?: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("online");
   const [online, setOnline] = useState<SocialPlayer[]>([]);
@@ -163,13 +166,15 @@ export default function Friends({
 
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-5 pb-16 animate-fade">
-      <div className="flex items-center gap-2 py-3 sticky top-0 z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
-        <button onClick={onBack} className="btn-game btn-ghost w-10 h-10 !rounded-xl flex items-center justify-center" aria-label="Back">
-          <ArrowLeft size={19} strokeWidth={2.8} />
-        </button>
-        <h2 className="font-display font-bold text-2xl flex-1">Friends 👥</h2>
-        <span className="chip px-2.5 py-1.5 text-[11px] font-black">🟢 {onlineFriends} friends online</span>
-      </div>
+      {showHeader && (
+        <div className="flex items-center gap-2 py-3 sticky top-0 z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
+          <button onClick={onBack} className="btn-game btn-ghost w-10 h-10 !rounded-xl flex items-center justify-center" aria-label="Back">
+            <ArrowLeft size={19} strokeWidth={2.8} />
+          </button>
+          <h2 className="font-display font-bold text-2xl flex-1">Friends 👥</h2>
+          <span className="chip px-2.5 py-1.5 text-[11px] font-black">🟢 {onlineFriends} friends online</span>
+        </div>
+      )}
 
       <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-3 -mx-1 px-1">
         {tabs.map((t) => (

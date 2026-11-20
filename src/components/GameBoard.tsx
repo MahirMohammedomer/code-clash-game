@@ -14,6 +14,7 @@ import { DEFAULT_AVATAR, type AvatarConfig } from "@/lib/avatar";
 import { Character, CharacterAvatar, SpeechBubble } from "./Character";
 import { MatchChatPanel, ReactionsBar, ReactionFloaters, useMatchSocial, type Floater } from "./MatchChat";
 import { soundEngine } from "@/lib/sound-effects";
+import Credits from "@/components/Credits";
 import { fireWinEffect } from "@/lib/win-effects";
 import { newHistoryId } from "@/lib/history";
 import { makeId, saveRoomSession, loadRoomSession } from "@/lib/session";
@@ -291,6 +292,9 @@ export function ResultOverlay({
           <button onClick={onPlayAgain} className="btn-game btn-green py-3.5 flex items-center justify-center gap-2">
             <Play size={18} strokeWidth={2.8} /> {playAgainLabel}
           </button>
+        </div>
+        <div className="mt-3">
+          <Credits compact />
         </div>
       </div>
     </div>

@@ -7,6 +7,7 @@ import { GuessRow, HeaderBar, Stage } from "./GameBoard";
 import { ReactionsBar, type Floater } from "./MatchChat";
 import type { BotMood } from "@/lib/game-engine";
 import type { MatchView, Player } from "@/lib/types";
+import Credits from "@/components/Credits";
 
 /**
  * Spectator mode — watch a live online match (secrets stay hidden until the
@@ -193,6 +194,9 @@ export default function Spectate({
           <p className="text-[11px] font-bold" style={{ color: "var(--board-soft)" }}>
             👁 You&rsquo;re spectating as {me.username} — your reactions appear for both players! Secrets stay hidden until the end.
           </p>
+          <div style={{ color: "var(--board-soft)" }}>
+            <Credits compact />
+          </div>
         </div>
       </div>
     </div>

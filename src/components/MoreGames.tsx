@@ -18,6 +18,7 @@ import { ArrowLeft, Gamepad2, Heart, History, Maximize, Pointer, RotateCcw, Sear
 import { MORE_GAMES, MORE_GAME_CATEGORIES, type MoreGame, type MoreGameCategory } from "@/lib/more-games";
 import { getBest } from "@/lib/arcade";
 import { soundEngine } from "@/lib/sound-effects";
+import Credits from "@/components/Credits";
 
 /** The twelve premium from-scratch remakes (code-split, loaded on demand). */
 const NATIVE_GAMES = {
@@ -93,7 +94,7 @@ function BackPill({ onClick, label = "BACK" }: { onClick: () => void; label?: st
   );
 }
 
-export default function MoreGames({ onBack }: { onBack: () => void }) {
+export default function MoreGames({ onBack, insetBottom = 0, onPlayingChange }: { onBack: () => void; /** Extra bottom padding when a global tab bar floats above the arcade. */ insetBottom?: number; /** Reports whether a game is currently being played (hides the global tab bar). */ onPlayingChange?: (playing: boolean) => void }) {
   const [query, setQuery] = useState("");
   const [cat, setCat] = useState<"All" | MoreGameCategory>("All");
   const [playing, setPlaying] = useState<MoreGame | null>(null);
@@ -108,7 +109,9 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
 
   const closePlayer = useCallback(() => {
     setPlaying(null);
+    onPlayingChange?.(false);
     setBestsTick((t) => t + 1); // refresh best-score chips after a remake run
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   void bestsTick;
 
@@ -148,6 +151,7 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
   const play = (game: MoreGame) => {
     soundEngine.playJoin();
     setPlaying(game);
+    onPlayingChange?.(true);
     setReloadTick(0);
     // keyboard-only classics get the on-screen pad automatically on phones
     const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
@@ -421,6 +425,9 @@ export default function MoreGames({ onBack }: { onBack: () => void }) {
             The 12 Featured Remakes are original Cipher Clash creations. Community Classics are
             open-source mini-games bundled for offline fun — each keeps its own authors and credits.
           </p>
+          <div style={{ paddingBottom: insetBottom }}>
+            <Credits dark />
+          </div>
         </div>
       </div>
 
