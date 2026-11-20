@@ -176,7 +176,7 @@ export async function ensureDatabaseReady() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
-      CREATE TABLE IF NOT EXISTS public.reviews (
+      CREATE TABLE IF NOT EXISTS public.game_reviews (
         id SERIAL PRIMARY KEY,
         player_id INTEGER,
         username TEXT NOT NULL,
