@@ -67,6 +67,14 @@ export const players = pgTable("players", {
   tutorialSeen: boolean("tutorial_seen").notNull().default(false),
   isAdmin: boolean("is_admin").notNull().default(false),
   clubId: integer("club_id"),
+  clubJoinedAt: timestamp("club_joined_at"),
+  streakShields: integer("streak_shields").notNull().default(0),
+  pinnedAchievements: jsonb("pinned_achievements").$type<string[]>().notNull().default([]),
+  soundTheme: text("sound_theme").notNull().default("classic"),
+  referralCode: text("referral_code"),
+  referredBy: text("referred_by"),
+  referralRewarded: boolean("referral_rewarded").notNull().default(false),
+  careerClaimed: jsonb("career_claimed").$type<string[]>().notNull().default([]),
   isOnline: boolean("is_online").notNull().default(true),
   lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -80,6 +88,28 @@ export const clubs = pgTable("clubs", {
   description: text("description").notNull(),
   totalTrophies: integer("total_trophies").notNull().default(0),
   memberCount: integer("member_count").notNull().default(1),
+  weeklyGoal: integer("weekly_goal").notNull().default(2000),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/** Clan (club) chat — scoped by clubId. */
+export const clanMessages = pgTable("clan_messages", {
+  id: serial("id").primaryKey(),
+  clubId: integer("club_id").notNull(),
+  senderId: integer("sender_id").notNull(),
+  senderName: text("sender_name").notNull(),
+  senderAvatarConfig: jsonb("sender_avatar_config").$type<AvatarConfig>(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/** One gift per sender→target per kind per day (post-match tips). */
+export const giftLog = pgTable("gift_log", {
+  id: serial("id").primaryKey(),
+  senderId: integer("sender_id").notNull(),
+  targetId: integer("target_id").notNull(),
+  kind: text("kind").notNull().default("coins"),
+  day: text("day").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -140,7 +170,7 @@ export const tournaments = pgTable("tournaments", {
   prizeCoins: integer("prize_coins").notNull().default(500),
   prizeGems: integer("prize_gems").notNull().default(25),
   participants: jsonb("participants").$type<HuntParticipant[]>().notNull().default([]),
-  bracketMatches: jsonb("bracket_matches").$type<unknown[]>().notNull().default([]),
+  bracketMatches: jsonb("bracket_matches").$type<unknown>(),
   createdBy: text("created_by").notNull(),
   endsAt: timestamp("ends_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),

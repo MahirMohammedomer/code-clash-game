@@ -1,14 +1,44 @@
 "use client";
 
+export type SoundThemeId = "classic" | "retro" | "chill";
+
+interface SoundTheme {
+  wave: OscillatorType;
+  accentWave: OscillatorType;
+  gain: number; // multiplier
+  pitch: number; // multiplier
+}
+
+const SOUND_THEMES: Record<SoundThemeId, SoundTheme> = {
+  classic: { wave: "sine", accentWave: "triangle", gain: 1, pitch: 1 },
+  retro: { wave: "square", accentWave: "square", gain: 0.62, pitch: 1.18 },
+  chill: { wave: "triangle", accentWave: "sine", gain: 0.8, pitch: 0.86 },
+};
+
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private muted: boolean = false;
+  private theme: SoundTheme = SOUND_THEMES.classic;
 
   constructor() {
     if (typeof window !== "undefined") {
       const saved = window.localStorage.getItem("code_clash_muted");
       if (saved === "true") this.muted = true;
+      const savedTheme = window.localStorage.getItem("cipherclash_sound_theme");
+      if (savedTheme && savedTheme in SOUND_THEMES) this.theme = SOUND_THEMES[savedTheme as SoundThemeId];
     }
+  }
+
+  /** Switch the global sound pack ("classic" | "retro" | "chill"). */
+  public setTheme(id: string): void {
+    if (id in SOUND_THEMES) this.theme = SOUND_THEMES[id as SoundThemeId];
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("cipherclash_sound_theme", id);
+    }
+  }
+
+  public getThemeId(): string {
+    return (Object.keys(SOUND_THEMES) as SoundThemeId[]).find((k) => SOUND_THEMES[k] === this.theme) || "classic";
   }
 
   private getContext(): AudioContext | null {
@@ -52,11 +82,12 @@ class SoundEngine {
     try {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(freq * 1.25, ctx.currentTime + 0.065);
+      const f = freq * this.theme.pitch;
+      osc.type = this.theme.wave;
+      osc.frequency.setValueAtTime(f, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(f * 1.25, ctx.currentTime + 0.065);
 
-      gain.gain.setValueAtTime(0.14, ctx.currentTime);
+      gain.gain.setValueAtTime(0.14 * this.theme.gain, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
 
       osc.connect(gain);
@@ -98,7 +129,7 @@ class SoundEngine {
       for (let i = 0; i < Math.min(count, 5); i++) {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.type = orders > 0 ? "triangle" : "sine";
+        osc.type = orders > 0 ? this.theme.accentWave : this.theme.wave;
         const startTime = ctx.currentTime + i * 0.065;
         const freq = baseNotes[Math.min(i + (orders > 0 ? 1 : 0), baseNotes.length - 1)];
         osc.frequency.setValueAtTime(freq, startTime);
@@ -144,7 +175,7 @@ class SoundEngine {
       melody.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.type = "triangle";
+        osc.type = this.theme.accentWave;
         const start = ctx.currentTime + idx * 0.095;
         const duration = idx === melody.length - 1 ? 0.42 : 0.15;
         osc.frequency.setValueAtTime(freq, start);
@@ -166,10 +197,10 @@ class SoundEngine {
       notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.type = "sine";
         const start = ctx.currentTime + idx * 0.07;
-        osc.frequency.setValueAtTime(freq, start);
-        gain.gain.setValueAtTime(0.16, start);
+        osc.type = this.theme.wave;
+        osc.frequency.setValueAtTime(freq * this.theme.pitch, start);
+        gain.gain.setValueAtTime(0.16 * this.theme.gain, start);
         gain.gain.exponentialRampToValueAtTime(0.001, start + 0.22);
         osc.connect(gain);
         gain.connect(ctx.destination);

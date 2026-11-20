@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, Coins, Gem, Lock, Shirt, Frame as FrameIcon, Palette, Sparkles, Tag, Play, MousePointerClick } from "lucide-react";
+import { ArrowLeft, Check, Coins, Gem, Lock, Shirt, Frame as FrameIcon, Palette, Sparkles, Tag, Play, MousePointerClick, Music as MusicIcon } from "lucide-react";
+import { STREAK_SHIELD } from "@/lib/game-engine";
 import { RARITY_COLORS, SHOP_ITEMS, type CosmeticCategory, type CosmeticItem } from "@/lib/game-engine";
 import { BOARD_THEMES, WIN_EFFECTS, getAvatarColor, type AvatarConfig } from "@/lib/avatar";
 import { fireWinEffect } from "@/lib/win-effects";
@@ -10,7 +11,7 @@ import type { Player } from "@/lib/types";
 import { soundEngine } from "@/lib/sound-effects";
 import Credits from "@/components/Credits";
 
-type Tab = "character" | "frame" | "theme" | "effect" | "title";
+type Tab = "character" | "frame" | "theme" | "effect" | "title" | "sound";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "character", label: "Character", icon: Shirt },
@@ -18,6 +19,7 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "theme", label: "Boards", icon: Palette },
   { id: "effect", label: "Win FX", icon: Sparkles },
   { id: "title", label: "Titles", icon: Tag },
+  { id: "sound", label: "Sound & Extras", icon: MusicIcon },
 ];
 
 function isEquipped(me: Player, item: CosmeticItem): boolean {
@@ -30,6 +32,8 @@ function isEquipped(me: Player, item: CosmeticItem): boolean {
     case "theme": return me.themeId === item.id;
     case "effect": return me.effectId === item.id;
     case "title": return me.title === item.meta;
+    case "sound": return (me.soundTheme || "classic") === item.meta;
+    case "consumable": return false;
   }
 }
 
@@ -67,6 +71,7 @@ export default function Shop({
 
   const items = useMemo(() => {
     if (tab === "character") return SHOP_ITEMS.filter((i) => i.category.startsWith("avatar_"));
+    if (tab === "sound") return SHOP_ITEMS.filter((i) => i.category === "sound" || i.category === "consumable");
     return SHOP_ITEMS.filter((i) => i.category === tab);
   }, [tab]);
 
@@ -77,11 +82,16 @@ export default function Shop({
     if (item.category === "frame") setPreviewFrame(item.id);
     if (item.category === "theme") setPreviewTheme(item.id);
     if (item.category === "effect") testEffect(item.id);
+    if (item.category === "sound") soundEngine.setTheme(item.meta);
   };
 
   const testEffect = (id: string) => { void fireWinEffect(id); };
 
-  const owned = (item: CosmeticItem) => me.ownedCosmetics.includes(item.id);
+  const owned = (item: CosmeticItem) => {
+    if (item.id === "streak_shield") return (me.streakShields || 0) > 0;
+    if (item.category === "sound" && !(item.priceCoins || item.priceGems)) return true; // free classic pack
+    return me.ownedCosmetics.includes(item.id);
+  };
   const canAfford = (item: CosmeticItem) =>
     item.priceCoins ? me.coins >= item.priceCoins : item.priceGems ? me.gems >= item.priceGems : true;
 
@@ -258,6 +268,7 @@ export default function Shop({
                 className={`btn-game px-5 py-3 flex items-center gap-1.5 ${canAfford(sel) ? "btn-green" : "btn-ghost"}`}
               >
                 {busyId === sel.id ? "..." : !canAfford(sel) ? <><Lock size={15} /> Not enough</> : sel.priceGems ? <><Gem size={16} /> Buy · {sel.priceGems}</> : <><Coins size={16} /> Buy · {sel.priceCoins ?? 0}</>}
+                {sel.id === "streak_shield" && (me.streakShields || 0) > 0 && <span className="ml-1 font-black">×{me.streakShields}</span>}
               </button>
             )}
           </div>

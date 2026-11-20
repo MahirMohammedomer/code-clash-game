@@ -323,7 +323,9 @@ export function pickLine(lines: string[]): string {
 
 export type CosmeticCategory =
   | "avatar_base" | "avatar_color" | "avatar_accessory" | "avatar_pattern"
-  | "frame" | "theme" | "effect" | "title";
+  | "frame" | "theme" | "effect" | "title"
+  | "sound"      // sound packs (changes every tap & jingle)
+  | "consumable"; // used on purchase (e.g. Streak Shield)
 
 export type Rarity = "common" | "rare" | "epic" | "legendary";
 
@@ -451,7 +453,18 @@ export const SHOP_ITEMS: CosmeticItem[] = [
   { id: "title_cipher_ghost", name: "Cipher Ghost", category: "title", description: "Silent and three steps ahead.", priceGems: 75, rarity: "epic", meta: "Cipher Ghost" },
   { id: "title_oracle_slayer", name: "Oracle Slayer", category: "title", description: "Outsmarted Aethelgard.", priceGems: 75, rarity: "epic", meta: "Oracle Slayer" },
   { id: "title_legend_candidate", name: "Legend Candidate", category: "title", description: "One step from the top.", priceGems: 150, rarity: "legendary", meta: "Legend Candidate" },
+
+  // Sound packs (change every tap, win & jingle in the whole app)
+  { id: "sound_classic", name: "Classic Sound", category: "sound", description: "The original soft chimes.", priceCoins: 0, rarity: "common", meta: "classic" },
+  { id: "sound_retro", name: "Retro 8-bit", category: "sound", description: "Squeaky arcade cabinet bleeps.", priceCoins: 400, rarity: "rare", meta: "retro" },
+  { id: "sound_chill", name: "Chill Lo-fi", category: "sound", description: "Mellow, sleepy, cozy taps.", priceCoins: 350, rarity: "rare", meta: "chill" },
+
+  // Consumables
+  { id: "streak_shield", name: "Streak Shield", category: "consumable", description: "Protects your day-streak once if you miss a day. Stacks up to 3.", priceCoins: 250, rarity: "epic", meta: "shield" },
 ];
+
+/** Price/cap for the Streak Shield consumable. */
+export const STREAK_SHIELD = { priceCoins: 250, max: 3 };
 
 export function getShopItem(id: string): CosmeticItem | undefined {
   return SHOP_ITEMS.find((i) => i.id === id);
@@ -726,6 +739,49 @@ export function dailyCodeShareText(dateKey: string, feedback: { points: number; 
   const score = won ? `${feedback.length}/${DAILY_CODE_MAX}` : `X/${DAILY_CODE_MAX}`;
   return `🧩 Cipher Clash — Daily Code ${dateKey}\nCracked in ${score} guesses!\n${grid}\nCan you beat me? Play free: npo.pro.et`;
 }
+
+
+/* --------------------------- Career Mode ladder --------------------------- */
+
+export interface CareerStage {
+  id: string;
+  name: string;
+  bot: AIDifficulty;
+  timer: number; // seconds per turn (0 = none)
+  desc: string; // shown to the player
+  /** Extra win conditions (checked after the match). */
+  maxTurns?: number; // must win within this many guesses
+  coins: number;
+  gems?: number;
+}
+
+
+export const CAREER_STAGES: CareerStage[] = [
+  { id: "c01", name: "First Steps", bot: "Rookie", timer: 60, desc: "Beat Pip — a warm-up for new detectives.", coins: 80 },
+  { id: "c02", name: "Quick Wit", bot: "Rookie", timer: 30, desc: "Beat Pip with only 30 seconds per turn.", coins: 90 },
+  { id: "c03", name: "Speedrun", bot: "Rookie", timer: 60, desc: "Crack Pip's code in 5 guesses or fewer.", coins: 100, maxTurns: 5 },
+  { id: "c04", name: "Mind Reader", bot: "Rookie", timer: 45, desc: "Crack Pip's code in 4 guesses or fewer.", coins: 120, maxTurns: 4 },
+  { id: "c05", name: "Rookie Slayer", bot: "Rookie", timer: 45, desc: "Crack Pip in 3 guesses — pure deduction.", coins: 150, maxTurns: 3 },
+
+  { id: "c06", name: "Tactician Trial", bot: "Tactician", timer: 60, desc: "Sly thinks in patterns. Out-think him.", coins: 160 },
+  { id: "c07", name: "Cold Blood", bot: "Tactician", timer: 30, desc: "Beat Sly under blitz pressure.", coins: 180 },
+  { id: "c08", name: "Pattern Breaker", bot: "Tactician", timer: 45, desc: "Crack Sly in 4 guesses or fewer.", coins: 210, maxTurns: 4 },
+  { id: "c09", name: "Efficiency", bot: "Tactician", timer: 45, desc: "Crack Sly in 3 guesses or fewer.", coins: 250, maxTurns: 3 },
+  { id: "c10", name: "Sly's Downfall", bot: "Tactician", timer: 45, desc: "Beat Sly without ever timing out.", coins: 280, gems: 5 },
+
+  { id: "c11", name: "Hoot's Exam", bot: "Mastermind", timer: 60, desc: "The Professor never guesses twice.", coins: 300 },
+  { id: "c12", name: "Deadline", bot: "Mastermind", timer: 30, desc: "Beat Professor Hoot in blitz mode.", coins: 340 },
+  { id: "c13", name: "Scholar", bot: "Mastermind", timer: 60, desc: "Crack Hoot in 5 guesses or fewer.", coins: 380, maxTurns: 5 },
+  { id: "c14", name: "Genius", bot: "Mastermind", timer: 60, desc: "Crack Hoot in 4 guesses or fewer.", coins: 430, maxTurns: 4 },
+  { id: "c15", name: "Professor's Nightmare", bot: "Mastermind", timer: 45, desc: "Crack Hoot in 3 — legendary logic.", coins: 500, gems: 8, maxTurns: 3 },
+
+  { id: "c16", name: "Face the Oracle", bot: "Oracle", timer: 60, desc: "Aethelgard sees possibilities. Survive.", coins: 560 },
+  { id: "c17", name: "Blind Prophecy", bot: "Oracle", timer: 30, desc: "Beat the Oracle in blitz mode.", coins: 620 },
+  { id: "c18", name: "Fate Breaker", bot: "Oracle", timer: 60, desc: "Crack Aethelgard in 5 guesses or fewer.", coins: 700, maxTurns: 5 },
+  { id: "c19", name: "Destiny's Rival", bot: "Oracle", timer: 60, desc: "Crack Aethelgard in 4 guesses or fewer.", coins: 800, gems: 12, maxTurns: 4 },
+  { id: "c20", name: "CIPHER MASTER", bot: "Oracle", timer: 45, desc: "The final exam: crack the Oracle in 3. Become a legend.", coins: 1000, gems: 25, maxTurns: 3 },
+];
+
 
 /* ------------------------------ Seasons ---------------------------------- */
 

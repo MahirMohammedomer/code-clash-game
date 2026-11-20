@@ -6,11 +6,16 @@ import {
   Globe, GraduationCap, KeyRound, Loader2, Lock, LogOut, Medal, MessageSquare,
   Moon, Play, Plus, Settings, Shield, ShoppingBag, Star, Sun, Swords, Target, Trophy,
   User, Users, Volume2, VolumeX, Zap, Timer, Sparkles, X, DoorOpen,
-  Bell, BellOff, History, QrCode, Wifi, Joystick, MessageCircle, WifiOff,
+  Bell, BellOff, History, QrCode, Wifi, Joystick, MessageCircle, WifiOff, Crown,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import GameBoard, { type GameConfig, type GameOutcome } from "@/components/GameBoard";
 import Credits from "@/components/Credits";
+import { fetchT } from "@/lib/fetch-t";
+import Career from "@/components/Career";
+import Clans from "@/components/Clans";
+import { CAREER_STAGES, careerStageMet, recordStageWin, type CareerStage } from "@/lib/career";
+import { computeWeeklyLeague } from "@/lib/leagues";
 
 // Heavy screens are code-split so the first load stays snappy.
 const Shop = dynamic(() => import("@/components/Shop"), { loading: () => <ScreenLoading label="Opening the shop..." /> });
@@ -40,14 +45,15 @@ import {
 import { soundEngine } from "@/lib/sound-effects";
 import type { InviteView, LeaderboardRow, Player, RoomSession, SeasonInfo, SocialPlayer } from "@/lib/types";
 
-type Screen = "boot" | "welcome" | "home" | "shop" | "rank" | "game" | "history" | "dailycode" | "tournaments" | "spectate" | "moregames" | "social" | "me";
+type Screen = "boot" | "welcome" | "home" | "shop" | "rank" | "game" | "history" | "dailycode" | "tournaments" | "spectate" | "moregames" | "social" | "me" | "career";
 
 /** The four main pages of the app (bottom tab bar). */
 type TabId = "home" | "moregames" | "social" | "me";
-type SocialTab = "chat" | "friends" | "reviews" | "feedback" | "admin";
+type SocialTab = "chat" | "friends" | "clans" | "reviews" | "feedback" | "admin";
 
 const SOCIAL_TABS: { id: SocialTab; label: string }[] = [
   { id: "chat", label: "Lobby Chat" },
+  { id: "clans", label: "Clans" },
   { id: "friends", label: "Friends" },
   { id: "reviews", label: "Reviews" },
   { id: "feedback", label: "Feedback" },
@@ -132,6 +138,8 @@ function makeLocalGuest(name: string): Player {
     completedAchievements: [], claimedDailyQuests: [],
     dailyStats: emptyDailyStats(localToday()),
     dailyChallengeDone: null,
+    streakShields: 0, pinnedAchievements: [], soundTheme: "classic", clubId: null,
+    referralCode: null, referredBy: null, careerClaimed: [],
     coins: 250, gems: 20, streakDays: 1, lastPlayDate: localToday(),
     wins: 0, losses: 0, totalGames: 0, fastestWinTurns: null,
     tutorialSeen: false, isAdmin: false, isGuest: true,
@@ -200,6 +208,11 @@ function equipOnPlayer(p: Player, item: CosmeticItem): Player {
     case "theme": next.themeId = item.id; break;
     case "effect": next.effectId = item.id; break;
     case "title": next.title = item.meta; break;
+    case "sound":
+      next.soundTheme = item.meta;
+      soundEngine.setTheme(item.meta);
+      break;
+    case "consumable": break; // handled in handleBuy
   }
   return next;
 }
@@ -286,6 +299,14 @@ export default function Page() {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     }
+    // Capture a referral invite (?ref=CODE) before it is cleared from the URL.
+    try {
+      const ref = new URLSearchParams(window.location.search).get("ref");
+      if (ref) {
+        localStorage.setItem("cipherclash_ref", ref.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24));
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    } catch {}
     const onBIP = (e: Event) => {
       e.preventDefault();
       setInstallEvt(e as unknown as { prompt: () => void; userChoice: Promise<{ outcome: string }> });
@@ -301,89 +322,141 @@ export default function Page() {
     };
     window.addEventListener("appinstalled", onInstalled);
 
-    (async () => {
+    /**
+     * WATCHDOG: the app must NEVER sit on the boot screen forever — whatever
+     * happens (hung server, paused database, terrible network), after 13s we
+     * leave "Loading your arena..." using whatever we have on-device.
+     */
+    const watchdog = setTimeout(() => {
+      if (screenRef.current !== "boot") return;
       const s = loadSession();
-      if (!s) { setScreen("welcome"); return; }
-      setSession(s);
-      if (s.isGuest) {
-        let g = loadGuestProfile();
-        if (!g) {
-          try {
-            const res = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth", mode: "guest", username: s.username }) });
-            const data = await res.json();
-            g = data.player as Player;
-          } catch {}
-          if (!g) g = makeLocalGuest(s.username);
-        }
-        if (g) {
-          g = { ...g, avatarConfig: normalizeAvatar(g.avatarConfig) };
-          // guest streak (local): simple day check
-          const today = localToday();
-          if (g.lastPlayDate !== today) {
-            const yday = new Date(Date.now() - 86400000).toLocaleDateString("en-CA");
-            g = { ...g, streakDays: g.lastPlayDate === yday ? (g.streakDays || 1) + 1 : 1, lastPlayDate: today };
+      if (s?.isGuest) {
+        const g = loadGuestProfile() || makeLocalGuest(s.username);
+        setSession(s);
+        setMe({ ...g, avatarConfig: normalizeAvatar(g.avatarConfig) });
+        setScreen("home");
+        setRoomResume(loadRoomSession());
+        setTimeout(() => showToast("Server is slow right now — offline mode ready! 📶", "err"), 500);
+      } else if (s && loadCachedProfile()) {
+        const cached = loadCachedProfile()!;
+        setSession(s);
+        setMe({ ...cached, avatarConfig: normalizeAvatar(cached.avatarConfig) });
+        setScreen("home");
+        setRoomResume(loadRoomSession());
+        setTimeout(() => showToast("Server is slow right now — showing your saved profile. Bot & arcade modes work!", "err"), 500);
+      } else {
+        setScreen("welcome");
+        setTimeout(() => showToast("Server took too long to answer — try again in a moment.", "err"), 400);
+      }
+    }, 13000);
+
+    (async () => {
+      try {
+        const s = loadSession();
+        if (!s) { setScreen("welcome"); return; }
+        setSession(s);
+        if (s.isGuest) {
+          let g = loadGuestProfile();
+          if (!g) {
+            try {
+              const res = await fetchT("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "auth", mode: "guest", username: s.username }) });
+              const data = await res.json();
+              g = data.player as Player;
+            } catch {}
+            if (!g) g = makeLocalGuest(s.username);
           }
-          saveGuestProfile(g);
-          setMe(g);
-          setScreen("home");
-          setRoomResume(loadRoomSession());
-          if (!g.tutorialSeen) setShowTutorial(true);
-          fetch("/api/state").then((r) => r.json()).then((d) => setLeaderboard(d.leaderboard || [])).catch(() => {});
+          if (g) {
+            g = { ...g, avatarConfig: normalizeAvatar(g.avatarConfig) };
+            // guest streak (local): simple day check with a shield fallback
+            const today = localToday();
+            let shieldToast: string | null = null;
+            if (g.lastPlayDate !== today) {
+              const yday = new Date(Date.now() - 86400000).toLocaleDateString("en-CA");
+              if (g.lastPlayDate === yday) {
+                g = { ...g, streakDays: (g.streakDays || 1) + 1, lastPlayDate: today };
+              } else if ((g.streakShields || 0) > 0) {
+                const kept = g.streakDays || 1;
+                g = { ...g, streakShields: (g.streakShields || 0) - 1, streakDays: kept, lastPlayDate: today };
+                shieldToast = `🛡️ Streak Shield used — your ${kept}-day streak survived!`;
+              } else {
+                g = { ...g, streakDays: 1, lastPlayDate: today };
+              }
+            }
+            const guest = g;
+            saveGuestProfile(guest);
+            setMe(guest);
+            setScreen("home");
+            setRoomResume(loadRoomSession());
+            if (shieldToast) setTimeout(() => showToast(shieldToast), 700);
+            if (!guest.tutorialSeen) setShowTutorial(true);
+            fetchT("/api/state").then((r) => r.json()).then((d) => setLeaderboard(d.leaderboard || [])).catch(() => {});
+            return;
+          }
+          setScreen("welcome");
           return;
         }
-        setScreen("welcome");
-        return;
-      }
-      // registered — show the cached profile INSTANTLY so launch never waits
-      // on the network; fresh state then loads in the background.
-      const cachedProfile = loadCachedProfile();
-      const showedCached = !!(cachedProfile && cachedProfile.username === s.username);
-      if (showedCached && cachedProfile) {
-        setMe({ ...cachedProfile, avatarConfig: normalizeAvatar(cachedProfile.avatarConfig) });
-        setScreen("home");
-        setRoomResume(loadRoomSession());
-      }
-      try {
-        const res = await fetch(`/api/state?token=${s.token}&tz=${tzEastMinutes()}`);
-        const data = await res.json();
-        if (!data.currentPlayer) throw new Error("session expired");
-        const p = { ...(data.currentPlayer as Player), avatarConfig: normalizeAvatar(data.currentPlayer.avatarConfig) };
-        setMe(p);
-        setLeaderboard(data.leaderboard || []);
-        if (data.season) applySeasonToUi(data.season as SeasonInfo);
-        setScreen("home");
-        setRoomResume(loadRoomSession());
-        if (data.streakInfo?.isNewDay) {
-          setTimeout(() => showToast(`Day ${data.streakInfo.streakDays} streak! +${data.streakInfo.bonusCoins} coins login bonus${data.streakInfo.bonusGems ? ` and +${data.streakInfo.bonusGems} gems!` : ""}`), 600);
+        // registered — show the cached profile INSTANTLY so launch never waits
+        // on the network; fresh state then loads in the background.
+        const cachedProfile = loadCachedProfile();
+        const showedCached = !!(cachedProfile && cachedProfile.username === s.username);
+        if (showedCached && cachedProfile) {
+          setMe({ ...cachedProfile, avatarConfig: normalizeAvatar(cachedProfile.avatarConfig) });
+          setScreen("home");
+          setRoomResume(loadRoomSession());
         }
-        if (!p.tutorialSeen) setTimeout(() => setShowTutorial(true), 500);
-        // flush queued results
-        const pending = loadPendingResults();
-        if (pending.length) {
-          clearPendingResults();
-          for (const pr of pending) {
-            await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...pr.payload, token: s.token }) }).catch(() => {});
+        try {
+          const res = await fetchT(`/api/state?token=${s.token}&tz=${tzEastMinutes()}`);
+          const data = await res.json();
+          // Only a real auth rejection logs us out; a 500/network hiccup must
+          // NOT clear the session (that used to strand players on boot).
+          if (!res.ok) throw new Error(data?.code === "auth" ? "session expired" : "server error");
+          if (!data.currentPlayer) throw new Error("session expired");
+          const p = { ...(data.currentPlayer as Player), avatarConfig: normalizeAvatar(data.currentPlayer.avatarConfig) };
+          setMe(p);
+          setLeaderboard(data.leaderboard || []);
+          if (data.season) applySeasonToUi(data.season as SeasonInfo);
+          setScreen("home");
+          setRoomResume(loadRoomSession());
+          if (data.streakInfo?.isNewDay) {
+            setTimeout(() => showToast(`Day ${data.streakInfo.streakDays} streak! +${data.streakInfo.bonusCoins} coins login bonus${data.streakInfo.bonusGems ? ` and +${data.streakInfo.bonusGems} gems!` : ""}`), 600);
           }
-          const r2 = await fetch(`/api/state?token=${s.token}&tz=${tzEastMinutes()}`).then((r) => r.json()).catch(() => null);
-          if (r2?.currentPlayer) setMe({ ...r2.currentPlayer, avatarConfig: normalizeAvatar(r2.currentPlayer.avatarConfig) });
+          if (!p.tutorialSeen) setTimeout(() => setShowTutorial(true), 500);
+          // flush queued results (career claims, offline match results…)
+          const pending = loadPendingResults();
+          if (pending.length) {
+            clearPendingResults();
+            for (const pr of pending) {
+              await fetchT("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...pr.payload, token: s.token }) }).catch(() => {});
+            }
+            const r2 = await fetchT(`/api/state?token=${s.token}&tz=${tzEastMinutes()}`).then((r) => r.json()).catch(() => null);
+            if (r2?.currentPlayer) setMe({ ...r2.currentPlayer, avatarConfig: normalizeAvatar(r2.currentPlayer.avatarConfig) });
+          }
+        } catch (e) {
+          // Network failure? Keep the stored token so the next launch can retry.
+          if (e instanceof Error && e.message === "session expired") {
+            clearSession();
+            setSession(null);
+            setScreen("welcome");
+          } else if (showedCached) {
+            // Offline / server down but we have a saved profile: stay in the app.
+            setTimeout(() => showToast("You're offline — showing your saved profile. Bot & arcade modes work!", "err"), 600);
+          } else {
+            // No cached profile, but we KNOW the credentials: build a temporary
+            // local profile instead of kicking the player out to the login page.
+            setMe(makeLocalGuest(s.username));
+            setScreen("home");
+            setRoomResume(loadRoomSession());
+            setTimeout(() => showToast("Server unreachable — playing in offline mode. Progress syncs when you reconnect!", "err"), 600);
+          }
         }
-      } catch (e) {
-        // Network failure? Keep the stored token so the next launch can retry.
-        if (e instanceof Error && e.message === "session expired") {
-          clearSession();
-          setSession(null);
-          setScreen("welcome");
-        } else if (showedCached) {
-          // Offline but we have a saved profile: stay in the app.
-          setTimeout(() => showToast("You're offline — showing your saved profile. Bot & arcade modes work!", "err"), 600);
-        } else {
-          setTimeout(() => showToast("Couldn't reach the server — check your connection. Guest & bot modes still work!", "err"), 600);
-          setScreen("welcome");
-        }
+      } catch {
+        // Absolute last resort: never leave the player stuck on boot.
+        setScreen(loadSession() ? "home" : "welcome");
       }
     })();
 
     return () => {
+      clearTimeout(watchdog);
       window.removeEventListener("beforeinstallprompt", onBIP);
       window.removeEventListener("appinstalled", onInstalled);
     };
@@ -394,6 +467,11 @@ export default function Page() {
   useEffect(() => {
     if (me && session && !session.isGuest) saveCachedProfile(me);
   }, [me, session]);
+
+  /* Apply the equipped sound pack whenever it changes. */
+  useEffect(() => {
+    if (me?.soundTheme) soundEngine.setTheme(me.soundTheme);
+  }, [me?.soundTheme]);
 
   /* Warm up heavy screens (arcade, shop) while the home screen idles, so
      opening them is instant. Skipped on data-saver / 2G connections. */
@@ -532,6 +610,19 @@ export default function Page() {
     }, 4500);
   }, [isStandalone, installEvt]);
 
+  /** Pin achievements on the profile (max 3). */
+  const savePinned = useCallback((ids: string[]) => {
+    if (!me) return;
+    if (session?.isGuest || !token) {
+      const updated = { ...me, pinnedAchievements: ids };
+      saveGuestProfile(updated);
+      setMe(updated);
+      return;
+    }
+    setMe({ ...me, pinnedAchievements: ids });
+    fetchT("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "pin_achievements", token, ids }) }).catch(() => {});
+  }, [me, session, token]);
+
   /** Open a secondary screen (shop, rank, replays…) remembering where to go back. */
   const openSecondary = useCallback((s: Screen) => {
     prevScreenRef.current = screen;
@@ -578,7 +669,7 @@ export default function Page() {
     }
     const res = await fetch("/api/state", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "auth", mode, username, password, tz: tzEastMinutes() }),
+      body: JSON.stringify({ action: "auth", mode, username, password, tz: tzEastMinutes(), ref: mode === "register" ? (localStorage.getItem("cipherclash_ref") || undefined) : undefined }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Something went wrong");
@@ -587,6 +678,13 @@ export default function Page() {
       const s: SessionData = { playerId: player.id, username: player.username, token: data.token, isGuest: false };
       saveSession(s); setSession(s); setMe(player);
       if (data.streakInfo?.isNewDay) setTimeout(() => showToast(`Day ${data.streakInfo.streakDays} streak! +${data.streakInfo.bonusCoins} coins`), 500);
+      if (data.refBonus) {
+        setTimeout(() => showToast("🎁 Referral applied — +200 coins!"), 900);
+        try { localStorage.removeItem("cipherclash_ref"); } catch {}
+      }
+      if (player.referralCode && !data.refBonus) {
+        try { localStorage.removeItem("cipherclash_ref"); } catch {}
+      }
       fetch("/api/state").then((r) => r.json()).then((d) => setLeaderboard(d.leaderboard || [])).catch(() => {});
     }
     if (data.season) applySeasonToUi(data.season as SeasonInfo);
@@ -617,6 +715,16 @@ export default function Page() {
     if (!me) return;
     // Always keep a local replay copy (works offline & for guests too).
     if (outcome.history) saveLocalHistoryEntry(outcome.history);
+
+    // Career Mode stage check (any match that carries a careerStageId).
+    const stage = gameConfig?.careerStageId ? CAREER_STAGES.find((s) => s.id === gameConfig.careerStageId) : undefined;
+    if (stage && careerStageMet(stage, outcome.won, outcome.turnsTaken)) {
+      recordStageWin(me.username, stage, outcome.turnsTaken);
+      setTimeout(() => showToast(`Career stage cleared: ${stage.name}! Claim your reward in Career Mode 🏅`), 1400);
+    } else if (stage && outcome.won && stage.maxTurns) {
+      setTimeout(() => showToast(`You won — but not within ${stage.maxTurns} guesses. Replay the stage to clear it!`, "err"), 1400);
+    }
+
     if (session?.isGuest || !token) {
       const updated = applyResultToGuest(me, outcome);
       const newOnes = updated.completedAchievements.filter((a) => !me.completedAchievements.includes(a));
@@ -653,12 +761,48 @@ export default function Page() {
       queuePendingResult(payload);
     }
     maybePostGameInstallAsk();
-  }, [me, session, token, showToast, applySeasonToUi, maybePostGameInstallAsk]);
+  }, [me, session, token, showToast, applySeasonToUi, maybePostGameInstallAsk, gameConfig]);
 
   /* --------------------------- shop actions --------------------------- */
   const handleBuy = async (item: CosmeticItem) => {
     if (!me) return;
     setBusyItem(item.id);
+
+    // Consumables (Streak Shield) are their own flow.
+    if (item.category === "consumable") {
+      if (session?.isGuest || !token) {
+        if (me.coins < (item.priceCoins || 0)) {
+          showToast(`Need ${item.priceCoins} coins — win matches to earn!`, "err");
+          setBusyItem(null);
+          return;
+        }
+        if ((me.streakShields || 0) >= 3) {
+          showToast("You already hold 3 shields — the max!", "err");
+          setBusyItem(null);
+          return;
+        }
+        const updated = { ...me, coins: me.coins - (item.priceCoins || 0), streakShields: (me.streakShields || 0) + 1 };
+        saveGuestProfile(updated);
+        setMe(updated);
+        soundEngine.playReward();
+        showToast("🛡️ Streak Shield bought! It saves your streak once if you miss a day.");
+        setBusyItem(null);
+        return;
+      }
+      try {
+        const res = await fetchT("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "buy_streak_shield", token }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Purchase failed");
+        setMe({ ...data.player, avatarConfig: normalizeAvatar(data.player.avatarConfig) });
+        soundEngine.playReward();
+        showToast("🛡️ Streak Shield bought! It saves your streak once if you miss a day.");
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : "Purchase failed", "err");
+      }
+      setBusyItem(null);
+      return;
+    }
+
     if (session?.isGuest || !token) {
       const priceC = item.priceCoins || 0, priceG = item.priceGems || 0;
       if (priceC && me.coins < priceC) { showToast(`Need ${priceC} coins — win matches to earn!`, "err"); setBusyItem(null); return; }
@@ -843,6 +987,14 @@ export default function Page() {
     setShowPlaySheet(false);
     setScreen("game");
     soundEngine.playTap(660);
+  };
+
+  const startCareerStage = (stage: CareerStage) => {
+    setLastTimer(stage.timer || 45);
+    setGameConfig({ mode: "ai", aiDifficulty: stage.bot, timerSeconds: stage.timer || 45, careerStageId: stage.id });
+    setShowPlaySheet(false);
+    setScreen("game");
+    soundEngine.playTap(700);
   };
 
   const startHotseat = (timer: number) => {
@@ -1148,7 +1300,7 @@ export default function Page() {
   /* Secondary screens highlight the tab they belong to. */
   const TAB_OF_SCREEN: Partial<Record<Screen, TabId>> = {
     home: "home", moregames: "moregames", social: "social", me: "me",
-    shop: "me", history: "me", rank: "social", dailycode: "home", tournaments: "home",
+    shop: "me", history: "me", rank: "social", dailycode: "home", tournaments: "home", career: "home",
   };
   const activeTab = TAB_OF_SCREEN[screen] ?? "home";
 
@@ -1334,7 +1486,7 @@ export default function Page() {
                 </button>
               </div>
 
-              {/* Daily Code + Code Hunts */}
+              {/* Daily Code + Code Hunts + Career */}
               <div className="grid grid-cols-2 gap-3">
                 <button onClick={() => { setScreen("dailycode"); soundEngine.playTap(620); }} className="card-game p-3.5 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5">
                   <span className="w-11 h-11 rounded-2xl flex items-center justify-center text-[22px] mb-2" style={{ background: "linear-gradient(135deg,#FFC800,#FF7A18)" }} aria-hidden>☀️</span>
@@ -1347,6 +1499,17 @@ export default function Page() {
                   <span className="text-[11px] font-bold block" style={{ color: "var(--ink-soft)" }}>First to crack the hunt code wins the prize pot!</span>
                 </button>
               </div>
+
+              {/* Career Mode ladder */}
+              <button onClick={() => { openSecondary("career"); soundEngine.playTap(640); }}
+                className="w-full card-game p-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform hover:-translate-y-0.5">
+                <span className="w-11 h-11 rounded-2xl flex items-center justify-center text-[22px] shrink-0" style={{ background: "linear-gradient(135deg,#FF7A18,#FF4B4B)" }} aria-hidden>🎖️</span>
+                <span className="flex-1 min-w-0">
+                  <span className="font-display font-semibold block leading-tight">Career Mode <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md text-white align-middle" style={{ background: "#FF4B4B" }}>20 STAGES</span></span>
+                  <span className="text-[11px] font-bold block" style={{ color: "var(--ink-soft)" }}>Beat the bot ladder, earn one-time rewards — works offline!</span>
+                </span>
+                <ChevronRight size={18} style={{ color: "var(--ink-faint)" }} />
+              </button>
 
               {/* More Games arcade banner */}
               <button onClick={() => { setScreen("moregames"); soundEngine.playTap(640); }}
@@ -1475,6 +1638,8 @@ export default function Page() {
           onInstall={installEvt || !isStandalone ? startInstallFromUi : undefined}
           canInstall={!isStandalone}
           onLogout={logout}
+          onTogglePin={savePinned}
+          showToast={showToast}
         />
       )}
 
@@ -1489,6 +1654,17 @@ export default function Page() {
 
       {screen === "tournaments" && (
         <Tournament me={me} token={token} onBack={goBack} showToast={showToast} onRefresh={refreshState} />
+      )}
+
+      {screen === "career" && (
+        <Career
+          me={me}
+          token={token}
+          onBack={goBack}
+          showToast={showToast}
+          onPlayerUpdate={(p) => setMe({ ...p, avatarConfig: normalizeAvatar(p.avatarConfig) })}
+          onStartStage={startCareerStage}
+        />
       )}
 
       {screen === "moregames" && (
@@ -1993,6 +2169,7 @@ function RankScreen({ leaderboard, me, onBack, onRefresh, onOpenPlayer }: {
   leaderboard: LeaderboardRow[]; me: Player; onBack: () => void; onRefresh: () => void; onOpenPlayer: (id: number) => void;
 }) {
   const myIdx = leaderboard.findIndex((r) => r.id === me.id);
+  const league = useMemo(() => computeWeeklyLeague(leaderboard, me.id), [leaderboard, me.id]);
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-5 pb-16 animate-fade">
       <div className="flex items-center gap-2 py-3 sticky top-0 z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
@@ -2000,6 +2177,37 @@ function RankScreen({ leaderboard, me, onBack, onRefresh, onOpenPlayer }: {
         <h2 className="font-display font-bold text-2xl flex-1">Leaderboard</h2>
         <button onClick={onRefresh} className="btn-game btn-ghost px-3 py-2 text-xs">Refresh</button>
       </div>
+
+      {/* weekly league — groups of 15, top 3 promoted, bottom 3 demoted */}
+      {league && (
+        <div className="card-game p-3.5 mb-3" style={{ background: "linear-gradient(135deg, rgba(28,176,246,0.14), rgba(165,96,232,0.10))" }}>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-display font-semibold flex items-center gap-1.5">🏅 Weekly League <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md text-white" style={{ background: "var(--blue)" }}>{league.label}</span></h3>
+          </div>
+          <p className="text-[11px] font-bold mb-2" style={{ color: "var(--ink-soft)" }}>
+            You&rsquo;re {league.myIndex >= 0 ? `#${league.myIndex + 1}` : "unranked"} of {league.rows.length} this week. Finish <b>top 3</b> to be promoted! 🎉
+          </p>
+          <div className="space-y-1">
+            {league.rows.map((r, i) => (
+              <div key={r.id} role="button" tabIndex={0} onClick={() => { if (!r.isMe) onOpenPlayer(r.id); }}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-xl text-left w-full"
+                style={{
+                  background: r.isMe ? "rgba(88,204,2,0.16)" : i < league.promoteCount ? "rgba(255,200,0,0.10)" : "var(--surface-3)",
+                  border: r.isMe ? "2px solid #58CC02" : i < league.promoteCount ? "2px solid rgba(255,200,0,0.5)" : "2px solid transparent",
+                }}>
+                <span className="font-display font-bold w-7 text-center text-sm" style={{ color: i === 0 ? "#E0A800" : "var(--ink-soft)" }}>
+                  {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}
+                </span>
+                <CharacterAvatar config={r.avatarConfig} frameId={r.frameId} size={30} ringWidth={2} />
+                <span className="font-black text-[13px] flex-1 truncate">{r.username}{r.isMe ? " (you)" : ""}</span>
+                {i >= league.rows.length - league.demoteCount && !r.isMe && <span className="text-[9px] font-black" style={{ color: "#FF4B4B" }}>▼ demotion</span>}
+                {i < league.promoteCount && !r.isMe && <span className="text-[9px] font-black" style={{ color: "#E0A800" }}>▲ promoted</span>}
+                <span className="font-black text-xs flex items-center gap-1 w-14 justify-end"><Trophy size={12} style={{ color: "#E0A800" }} />{r.trophies}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* divisions overview */}
       <div className="card-game p-3 mb-3">
@@ -2272,7 +2480,7 @@ function SocialPage({ me, token, leaderboard, showToast, tab, setTab, isAdmin, p
   inviteCount: number;
 }) {
   const tabs: SocialTab[] = [...SOCIAL_TABS.map((t) => t.id), ...(isAdmin ? (["admin"] as SocialTab[]) : [])];
-  const communityInitial: Record<Exclude<SocialTab, "friends">, "lobby" | "reviews" | "feedback" | "admin"> = {
+  const communityInitial: Record<Exclude<SocialTab, "friends" | "clans">, "lobby" | "reviews" | "feedback" | "admin"> = {
     chat: "lobby", reviews: "reviews", feedback: "feedback", admin: "admin",
   };
   return (
@@ -2319,10 +2527,11 @@ function SocialPage({ me, token, leaderboard, showToast, tab, setTab, isAdmin, p
             <button key={t} onClick={() => { setTab(t); soundEngine.playTap(500); }}
               className={`btn-game px-4 py-2.5 whitespace-nowrap text-sm flex items-center gap-1.5 ${active ? "btn-blue" : "btn-ghost"}`}>
               {t === "chat" && <MessageCircle size={15} strokeWidth={2.6} />}
+              {t === "clans" && <Shield size={15} strokeWidth={2.6} />}
               {t === "friends" && <Users size={15} strokeWidth={2.6} />}
               {t === "reviews" && <Star size={15} strokeWidth={2.6} />}
               {t === "feedback" && <MessageSquare size={15} strokeWidth={2.6} />}
-              {t === "admin" && <Shield size={15} strokeWidth={2.6} />}
+              {t === "admin" && <Crown size={15} strokeWidth={2.6} />}
               {label}
               {t === "friends" && friendsOnline > 0 && (
                 <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#58CC02] text-white text-[10px] font-black flex items-center justify-center">{friendsOnline}</span>
@@ -2344,6 +2553,8 @@ function SocialPage({ me, token, leaderboard, showToast, tab, setTab, isAdmin, p
           onEnterRoom={onEnterRoom}
           showHeader={false}
         />
+      ) : tab === "clans" ? (
+        <Clans me={me} token={token} showToast={showToast} onOpenPlayer={onOpenPlayer} />
       ) : (
         <Community
           key={tab}
@@ -2351,7 +2562,7 @@ function SocialPage({ me, token, leaderboard, showToast, tab, setTab, isAdmin, p
           token={token}
           onBack={() => undefined}
           showToast={showToast}
-          initialTab={communityInitial[tab as Exclude<SocialTab, "friends">]}
+          initialTab={communityInitial[tab as Exclude<SocialTab, "friends" | "clans">]}
           showHeader={false}
           showTabs={false}
         />
@@ -2376,7 +2587,7 @@ function SocialPage({ me, token, leaderboard, showToast, tab, setTab, isAdmin, p
 
 /* ------------------------------- Me page ------------------------------- */
 
-function MePage({ me, rank, isGuest, onCustomize, onReplays, onLeaderboard, onTutorial, onOpenSettings, onOpenProfile, onInstall, canInstall, onLogout }: {
+function MePage({ me, rank, isGuest, onCustomize, onReplays, onLeaderboard, onTutorial, onOpenSettings, onOpenProfile, onInstall, canInstall, onLogout, onTogglePin, showToast }: {
   me: Player;
   rank: number | null;
   isGuest: boolean;
@@ -2389,11 +2600,30 @@ function MePage({ me, rank, isGuest, onCustomize, onReplays, onLeaderboard, onTu
   onInstall: (() => void) | undefined;
   canInstall: boolean;
   onLogout: () => void;
+  onTogglePin: (ids: string[]) => void;
+  showToast: (m: string, k?: "ok" | "err") => void;
 }) {
   const winRate = me.totalGames ? Math.round((me.wins / me.totalGames) * 100) : 0;
   const div = getDivisionForTrophies(me.trophies);
   const next = nextDivision(me.trophies);
   const divProgress = next ? Math.min(100, ((me.trophies - div.minTrophies) / Math.max(1, next.minTrophies - div.minTrophies)) * 100) : 100;
+  const pinned = me.pinnedAchievements || [];
+
+  const togglePin = (id: string) => {
+    soundEngine.playTap(640);
+    const next_ = pinned.includes(id) ? pinned.filter((p) => p !== id) : pinned.length >= 3 ? pinned : [...pinned, id];
+    if (!pinned.includes(id) && pinned.length >= 3) showToast("You can pin up to 3 achievements", "err");
+    onTogglePin(next_);
+  };
+
+  const copyInvite = async () => {
+    if (!me.referralCode) return;
+    const link = `${window.location.origin}/?ref=${me.referralCode}`;
+    try {
+      if (navigator.share) await navigator.share({ title: "Cipher Clash", text: "Crack codes with me in Cipher Clash!", url: link });
+      else { await navigator.clipboard.writeText(link); showToast("Invite link copied! 📋"); }
+    } catch {}
+  };
 
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-5 pt-4 pb-32 animate-fade">
@@ -2415,7 +2645,25 @@ function MePage({ me, rank, isGuest, onCustomize, onReplays, onLeaderboard, onTu
             <span className="chip px-2 py-1 text-[11px] font-black flex items-center gap-1">
               <Flame size={12} style={{ color: "#FF7A18" }} fill="#FF7A18" /> {me.streakDays} days
             </span>
+            {(me.streakShields || 0) > 0 && (
+              <span className="chip px-2 py-1 text-[11px] font-black flex items-center gap-1" title="Streak Shields — protect a broken streak">
+                🛡️ ×{me.streakShields}
+              </span>
+            )}
           </div>
+          {pinned.length > 0 && (
+            <div className="flex flex-wrap justify-center gap-1 mt-2">
+              {pinned.map((id) => {
+                const a = ACHIEVEMENTS.find((x) => x.id === id);
+                if (!a) return null;
+                return (
+                  <span key={id} className="rounded-lg px-2 py-1 text-[10px] font-black text-white" style={{ background: "#E0A800" }}>
+                    🏅 {a.title}
+                  </span>
+                );
+              })}
+            </div>
+          )}
           {next && (
             <div className="w-full max-w-[240px] mt-3">
               <div className="h-3 rounded-full overflow-hidden" style={{ background: "rgba(0,0,0,0.14)", border: "2px solid var(--board-border)" }}>
@@ -2479,19 +2727,25 @@ function MePage({ me, rank, isGuest, onCustomize, onReplays, onLeaderboard, onTu
         </div>
       )}
 
-      {/* achievements */}
+      {/* achievements (tap an earned one to pin it on your profile — up to 3) */}
       <div className="mt-4">
         <h3 className="font-display font-semibold mb-2 flex items-center gap-1.5">
           <Medal size={17} style={{ color: "#E0A800" }} /> Achievements ({me.completedAchievements.length}/{ACHIEVEMENTS.length})
+          <span className="text-[10px] font-black" style={{ color: "var(--ink-faint)" }}>— tap to pin!</span>
         </h3>
         <div className="grid grid-cols-2 gap-1.5">
           {ACHIEVEMENTS.map((a) => {
             const has = me.completedAchievements.includes(a.id);
+            const isPinned = pinned.includes(a.id);
             return (
-              <div key={a.id} className="rounded-2xl p-2.5 flex items-start gap-2" style={{
-                background: has ? "rgba(255,200,0,0.14)" : "var(--surface-3)",
-                border: `2px solid ${has ? "#FFC800" : "var(--border)"}`, opacity: has ? 1 : 0.65,
-              }}>
+              <div key={a.id} onClick={has ? () => togglePin(a.id) : undefined} role={has ? "button" : undefined}
+                className="rounded-2xl p-2.5 flex items-start gap-2 relative"
+                style={{
+                  background: has ? "rgba(255,200,0,0.14)" : "var(--surface-3)",
+                  border: `2px solid ${isPinned ? "#FF4B6E" : has ? "#FFC800" : "var(--border)"}`,
+                  opacity: has ? 1 : 0.65,
+                  cursor: has ? "pointer" : "default",
+                }}>
                 <span className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-white" style={{ background: has ? "#E0A800" : "var(--border-strong)" }}>
                   {has ? <Medal size={17} strokeWidth={2.5} /> : <Lock size={15} />}
                 </span>
@@ -2500,11 +2754,29 @@ function MePage({ me, rank, isGuest, onCustomize, onReplays, onLeaderboard, onTu
                   <span className="text-[10px] font-bold block leading-tight" style={{ color: "var(--ink-soft)" }}>{a.description}</span>
                   <span className="text-[10px] font-black flex items-center gap-0.5" style={{ color: "#1CB0F6" }}>+{a.rewardGems} <Gem size={10} /></span>
                 </span>
+                {isPinned && (
+                  <span className="absolute top-1 right-1 text-[9px] font-black px-1.5 py-0.5 rounded-md text-white" style={{ background: "#FF4B6E" }}>PINNED</span>
+                )}
               </div>
             );
           })}
         </div>
       </div>
+
+      {/* invite friends (referral rewards) */}
+      {me.referralCode && (
+        <button onClick={copyInvite} className="w-full rounded-2xl p-3.5 mt-4 flex items-center gap-3 text-left active:scale-[0.98] transition-transform"
+          style={{ background: "linear-gradient(135deg,#58CC02,#14D4C5)", color: "#fff", border: "2px solid rgba(255,255,255,0.4)", boxShadow: "var(--shadow-card)" }}>
+          <span className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 text-[22px]" style={{ background: "rgba(255,255,255,0.25)" }}>🎁</span>
+          <span className="flex-1 min-w-0">
+            <span className="font-display font-bold block leading-tight">Invite a friend — you BOTH get 200 coins!</span>
+            <span className="text-[11px] font-bold block" style={{ color: "rgba(255,255,255,0.95)" }}>
+              {me.referredBy ? "Referral applied 🎉 · " : ""}Tap to share your invite link
+            </span>
+          </span>
+          <ChevronRight size={18} strokeWidth={3} />
+        </button>
+      )}
 
       <button onClick={onLogout} className="btn-game btn-ghost w-full py-3 mt-4 flex items-center justify-center gap-2">
         <LogOut size={18} strokeWidth={2.6} /> {isGuest ? "Exit guest mode" : "Log out"}

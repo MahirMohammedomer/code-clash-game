@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowLeft, Delete, Dices, Lock, Pencil, Play, Home, Trophy, Coins, Zap,
   MessageCircle, Copy, Check, WifiOff, Flag, Clock, Lightbulb, Eye, EyeOff,
-  Swords, TimerOff, Share2, Hourglass, Crown,
+  Swords, TimerOff, Share2, Hourglass, Crown, Gift,
 } from "lucide-react";
 import {
   AI_BOTS, computeAINextGuess, computeTrophyDelta, evaluateGuess, generateRandomCode,
@@ -15,6 +15,7 @@ import { Character, CharacterAvatar, SpeechBubble } from "./Character";
 import { MatchChatPanel, ReactionsBar, ReactionFloaters, useMatchSocial, type Floater } from "./MatchChat";
 import { soundEngine } from "@/lib/sound-effects";
 import Credits from "@/components/Credits";
+import { shareResult } from "@/lib/share-card";
 import { fireWinEffect } from "@/lib/win-effects";
 import { newHistoryId } from "@/lib/history";
 import { makeId, saveRoomSession, loadRoomSession } from "@/lib/session";
@@ -31,6 +32,7 @@ export interface GameConfig {
   dailyChallengeId?: string;
   isRematchSearch?: boolean;
   race?: boolean; // online race hint (match.mode is authoritative once loaded)
+  careerStageId?: string; // Career Mode ladder stage (checked in handleResult)
 }
 
 export interface GameOutcome {
@@ -245,7 +247,7 @@ export function InputTiles({ value, secret = false, shake }: { value: string; se
 }
 
 export function ResultOverlay({
-  title, subtitle, winnerConfig, loserConfig, winnerFrame, rewards, turns, onPlayAgain, onHome, playAgainLabel, extra,
+  title, subtitle, winnerConfig, loserConfig, winnerFrame, rewards, turns, onPlayAgain, onHome, playAgainLabel, extra, onGift, giftState,
 }: {
   title: string; subtitle: string;
   winnerConfig: AvatarConfig; loserConfig: AvatarConfig; winnerFrame: string;
@@ -253,6 +255,9 @@ export function ResultOverlay({
   turns: number;
   onPlayAgain: () => void; onHome: () => void; playAgainLabel: string;
   extra?: React.ReactNode;
+  /** Post-match coin gift to the opponent (online matches). */
+  onGift?: () => void;
+  giftState?: "idle" | "sent" | "busy";
 }) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -285,12 +290,25 @@ export function ResultOverlay({
         )}
 
         {extra}
-        <div className="grid grid-cols-2 gap-2.5 mt-5">
-          <button onClick={onHome} className="btn-game btn-ghost py-3.5 flex items-center justify-center gap-2">
-            <Home size={18} strokeWidth={2.6} /> Home
+        {onGift && (
+          <button onClick={onGift} disabled={giftState !== "idle"}
+            className="btn-game btn-gold w-full py-2.5 mt-3 text-sm flex items-center justify-center gap-1.5">
+            <Gift size={15} strokeWidth={2.6} />
+            {giftState === "sent" ? "🎁 Gift sent!" : giftState === "busy" ? "Sending..." : "🎁 Gift 10 coins — GG!"}
+          </button>
+        )}
+        <div className="grid grid-cols-2 gap-2.5 mt-2.5">
+          <button onClick={() => { void shareResult({ title, subtitle, mode: "Cipher Clash match", stats: [{ label: "Turns", value: String(turns) }, ...(rewards ? [{ label: "Coins", value: `+${rewards.coins}` }] : [])] }); }}
+            className="btn-game btn-ghost py-3.5 flex items-center justify-center gap-2">
+            <Share2 size={18} strokeWidth={2.6} /> Share
           </button>
           <button onClick={onPlayAgain} className="btn-game btn-green py-3.5 flex items-center justify-center gap-2">
             <Play size={18} strokeWidth={2.8} /> {playAgainLabel}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 mt-2.5">
+          <button onClick={onHome} className="btn-game btn-ghost py-3 flex items-center justify-center gap-2">
+            <Home size={18} strokeWidth={2.6} /> Home
           </button>
         </div>
         <div className="mt-3">
@@ -815,6 +833,7 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
   const [mySecret, setMySecret] = useState(() => loadRoomSession()?.secret || "");
   const [submitting, setSubmitting] = useState(false);
   const [connFails, setConnFails] = useState(0);
+  const [giftState, setGiftState] = useState<"idle" | "sent" | "busy">("idle");
   const [presence, setPresence] = useState<{ p1: string | null; p2: string | null }>({ p1: null, p2: null });
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [chatOpen, setChatOpen] = useState(false);
@@ -1122,6 +1141,26 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
     return () => { alive = false; clearInterval(t); };
   }, [phase, authToken, oppPlayerId, onEnterRoom]);
 
+  /** Post-match coin gift to the opponent (once per day, server-deduped). */
+  const sendGift = async () => {
+    if (!authToken || !oppPlayerId || giftState !== "idle") return;
+    setGiftState("busy");
+    soundEngine.playTap(700);
+    try {
+      const res = await fetch("/api/state", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send_gift", token: authToken, targetId: oppPlayerId, kind: "coins" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Gift failed");
+      setGiftState("sent");
+      showToast("🎁 Gift sent — GG! They received 10 coins.");
+    } catch (e) {
+      setGiftState("idle");
+      showToast(e instanceof Error ? e.message : "Gift failed — create an account to gift!", "err");
+    }
+  };
+
   const sendRematch = async () => {
     if (!authToken || !oppPlayerId) return;
     setRematchState("sent");
@@ -1404,6 +1443,8 @@ function OnlineGame({ me, config, onExit, onResult, onPlayAgainOnline, showToast
           onPlayAgain={() => (onPlayAgainOnline ? onPlayAgainOnline() : onExit())}
           onHome={onExit}
           playAgainLabel="Find new rival"
+          onGift={oppPlayerId ? sendGift : undefined}
+          giftState={giftState}
           extra={oppPlayerId && authToken && onEnterRoom ? (
             rematchState === "incoming" ? (
               <button onClick={acceptRematch} className="btn-game btn-purple w-full py-3 mt-4 animate-invite-ring">

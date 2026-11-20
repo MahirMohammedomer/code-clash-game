@@ -141,6 +141,18 @@ export default function PlayerCard({
                   </span>
                   <span className="chip px-2 py-1 text-[11px] font-black">Level {profile.level}</span>
                 </div>
+                {(profile.pinnedAchievements?.length || 0) > 0 && (
+                  <div className="flex flex-wrap justify-center gap-1 mt-2">
+                    {(profile.pinnedAchievements || []).map((id) => {
+                      const a = ACHIEVEMENTS.find((x) => x.id === id);
+                      return a ? (
+                        <span key={id} className="rounded-lg px-2 py-1 text-[10px] font-black text-white" style={{ background: "#E0A800" }}>
+                          🏅 {a.title}
+                        </span>
+                      ) : null;
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -154,6 +166,7 @@ export default function PlayerCard({
                   { v: profile.followers, l: "Followers" },
                   { v: profile.following, l: "Following" },
                   { v: profile.achievements.length, l: `of ${ACHIEVEMENTS.length} 🏅` },
+                  { v: profile.pinnedAchievements?.length || 0, l: "Pinned 📌" },
                   { v: new Date(profile.createdAt).toLocaleDateString("en-GB", { month: "short", year: "2-digit" }), l: "Joined" },
                 ].map((s) => (
                   <div key={s.l} className="rounded-2xl py-2.5 px-1" style={{ background: "var(--surface-3)", border: "2px solid var(--border)" }}>

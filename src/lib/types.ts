@@ -38,6 +38,14 @@ export interface Player {
   isOnline?: boolean;
   lastSeenAt?: string;
   createdAt?: string;
+  /* --- v4.2 --- */
+  streakShields?: number; // consumable: saves a broken streak
+  pinnedAchievements?: string[]; // up to 3 shown on profile
+  soundTheme?: string; // "classic" | "retro" | "chill"
+  clubId?: number | null; // clan (club) membership
+  referralCode?: string | null;
+  referredBy?: string | null;
+  careerClaimed?: string[]; // claimed career stage ids
 }
 
 export interface GuessEntry {
@@ -215,6 +223,7 @@ export interface PublicProfile {
   isFollowing: boolean; // requester follows them
   followsMe: boolean;
   achievements: string[];
+  pinnedAchievements?: string[]; // up to 3 showcased badges
   h2h: { wins: number; losses: number } | null; // requester's record vs this player
 }
 
@@ -248,6 +257,7 @@ export interface HuntGuesserView {
 export interface TournamentView {
   id: number;
   name: string;
+  type?: string; // "mass_hunt" | "bracket_8"
   status: string; // live | finished
   isPrivate: boolean;
   inviteCode: string | null;
@@ -261,6 +271,24 @@ export interface TournamentView {
   leaderboard: HuntGuesserView[];
   mine: { guesses: { guess: string; points: number; orders: number }[]; solved: boolean } | null;
   canPlay: boolean; // false for the hunt's own creator
+  isHost?: boolean; // bracket cup host
+  joined?: boolean; // bracket cup membership
+  participantCount?: number;
+  bracket?: {
+    size: number;
+    champion: string;
+    rounds: { a: string; b: string; aKey: string | null; bKey: string | null; winner: string; winnerKey: string | null; decided: boolean }[][];
+  } | null;
+}
+
+export interface BracketMatchView {
+  a: string;
+  b: string;
+  aKey: string | null;
+  bKey: string | null;
+  winner: string;
+  winnerKey: string | null;
+  decided: boolean;
 }
 
 export interface SeasonInfo {

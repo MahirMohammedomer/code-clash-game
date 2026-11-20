@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { players, resultLog, matchHistory, follows, matches } from "@/db/schema";
+import { players, resultLog, matchHistory, follows, matches, clubs, clanMessages, giftLog } from "@/db/schema";
 import { ensureDatabaseReady } from "@/db/seed";
 import { eq, desc, sql, and, gt, or, inArray } from "drizzle-orm";
 import {
@@ -9,6 +9,8 @@ import {
   STARTER_OWNED,
   DAILY_QUESTS,
   ACHIEVEMENTS,
+  CAREER_STAGES,
+  STREAK_SHIELD,
   emptyDailyStats,
   getDailyChallenge,
   currentSeasonId,
@@ -20,7 +22,7 @@ import {
 } from "@/lib/game-engine";
 import { normalizeAvatar } from "@/lib/avatar";
 import { hashPassword, verifyPassword, issueToken, verifyToken, adminUsernames } from "@/lib/auth-server";
-import { sanitizeUsername } from "@/lib/security";
+import { sanitizeUsername, sanitizeText } from "@/lib/security";
 
 type PlayerRow = typeof players.$inferSelect;
 
@@ -61,13 +63,19 @@ async function applyStreak(p: PlayerRow, tzEast: number) {
   let streak = 1;
   let bonusCoins = 25;
   let bonusGems = 0;
-  if (p.lastPlayDate && daysBetween(p.lastPlayDate, today) === 1) {
+  let shieldsUsed = 0;
+  const gap = p.lastPlayDate ? daysBetween(p.lastPlayDate, today) : 999;
+  if (gap === 1) {
     streak = (p.streakDays || 1) + 1;
     bonusCoins = 25 + Math.min(streak, 10) * 5;
     if (streak === 3) bonusGems = 10;
     if (streak === 7) bonusGems = 30;
     if (streak === 14) bonusGems = 60;
     if (streak === 30) bonusGems = 150;
+  } else if (gap > 1 && (p.streakDays || 1) > 1 && (p.streakShields || 0) > 0) {
+    // A Streak Shield saves the streak (one shield per missed chain).
+    shieldsUsed = 1;
+    streak = p.streakDays || 1;
   }
 
   const achievements = Array.isArray(p.completedAchievements) ? [...p.completedAchievements] : [];
@@ -85,6 +93,7 @@ async function applyStreak(p: PlayerRow, tzEast: number) {
       dailyStats: stats,
       coins: p.coins + bonusCoins,
       gems: p.gems + bonusGems,
+      streakShields: Math.max(0, (p.streakShields || 0) - shieldsUsed),
       completedAchievements: achievements,
       lastSeenAt: new Date(),
       isOnline: true,
@@ -94,7 +103,7 @@ async function applyStreak(p: PlayerRow, tzEast: number) {
 
   return {
     player: updated,
-    streakInfo: { streakDays: streak, bonusCoins, bonusGems, isNewDay: true },
+    streakInfo: { streakDays: streak, bonusCoins, bonusGems, isNewDay: true, shieldUsed: shieldsUsed > 0 },
   };
 }
 
@@ -245,7 +254,16 @@ export async function GET(req: NextRequest) {
     let season: object | null = null;
 
     if (playerId) {
-      const [row] = await db.select().from(players).where(eq(players.id, playerId)).limit(1);
+      let [row] = await db.select().from(players).where(eq(players.id, playerId)).limit(1);
+      if (row && !row.referralCode) {
+        // Give older accounts a referral code lazily so they can invite friends too.
+        const [stamped] = await db
+          .update(players)
+          .set({ referralCode: `cc${row.id.toString(36)}${Math.random().toString(36).slice(2, 5)}` })
+          .where(eq(players.id, row.id))
+          .returning();
+        row = stamped;
+      }
       if (row) {
         const res = await applyStreak(row, Number.isFinite(tzEast) ? tzEast : 0);
         streakInfo = res.streakInfo;
@@ -328,9 +346,30 @@ export async function POST(req: NextRequest) {
             dailyStats: emptyDailyStats(today),
             ownedCosmetics: [...STARTER_OWNED],
             isAdmin: adminUsernames().includes(name.toLowerCase()),
+            referredBy: typeof body.ref === "string" ? body.ref.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24) || null : null,
           })
           .returning();
-        return NextResponse.json({ player: publicPlayer(created), token: issueToken(created.id) });
+
+        // Stamp a personal referral code on every new account.
+        const [withCode] = await db
+          .update(players)
+          .set({ referralCode: `cc${created.id.toString(36)}${Math.random().toString(36).slice(2, 5)}` })
+          .where(eq(players.id, created.id))
+          .returning();
+
+        // Referral rewards: both sides get +200 coins, paid once.
+        let refBonus = 0;
+        if (withCode.referredBy) {
+          const [referrer] = await db.select().from(players).where(eq(players.referralCode, withCode.referredBy)).limit(1);
+          if (referrer && referrer.id !== withCode.id) {
+            await db.update(players).set({ coins: referrer.coins + 200 }).where(eq(players.id, referrer.id));
+            refBonus = 200;
+          }
+        }
+        const finalPlayer = refBonus
+          ? (await db.update(players).set({ coins: withCode.coins + 200, referralRewarded: true }).where(eq(players.id, withCode.id)).returning())[0]
+          : withCode;
+        return NextResponse.json({ player: publicPlayer(finalPlayer), token: issueToken(created.id), refBonus });
       }
 
       // login
@@ -449,6 +488,8 @@ export async function POST(req: NextRequest) {
           isFollowing,
           followsMe,
           achievements: Array.isArray(target.completedAchievements) ? target.completedAchievements : [],
+          pinnedAchievements: Array.isArray(target.pinnedAchievements) ? target.pinnedAchievements : [],
+          referralCode: null, // never expose another player's referral code
           h2h,
         },
       });
@@ -555,6 +596,7 @@ export async function POST(req: NextRequest) {
         case "theme": updates.themeId = item.id; break;
         case "effect": updates.effectId = item.id; break;
         case "title": updates.title = item.meta; break;
+        case "sound": updates.soundTheme = item.meta; break;
       }
       return updates;
     };
@@ -726,6 +768,156 @@ export async function POST(req: NextRequest) {
 
       await saveHistory(base.id, body.history, { won, mode: String(body.mode || "ai"), turnsTaken });
       return NextResponse.json({ player: publicPlayer(updated), applied: true, unlocked, bonusGems, dailyBonus });
+    }
+
+    /* ------------------------- v4.2: clans, shields, gifts, career ------------------------- */
+
+    if (action === "clan_info") {
+      if (!player.clubId) return NextResponse.json({ club: null });
+      const [club] = await db.select().from(clubs).where(eq(clubs.id, player.clubId)).limit(1);
+      if (!club) return NextResponse.json({ club: null });
+      const roster = await db
+        .select()
+        .from(players)
+        .where(eq(players.clubId, club.id))
+        .orderBy(desc(players.trophies))
+        .limit(30);
+      const msgs = await db
+        .select()
+        .from(clanMessages)
+        .where(eq(clanMessages.clubId, club.id))
+        .orderBy(desc(clanMessages.id))
+        .limit(40);
+      return NextResponse.json({
+        club: {
+          id: club.id, name: club.name, tag: club.tag, badgeEmoji: club.badgeEmoji,
+          description: club.description, memberCount: club.memberCount,
+          totalTrophies: roster.reduce((s, r) => s + r.trophies, 0),
+          weeklyGoal: club.weeklyGoal,
+        },
+        roster: roster.map((r) => ({
+          id: r.id, username: r.username, trophies: r.trophies, division: r.division,
+          avatarConfig: normalizeAvatar(r.avatarConfig), frameId: r.frameId,
+          isOnline: r.isOnline && Date.now() - new Date(r.lastSeenAt).getTime() < 3 * 60 * 1000,
+        })),
+        messages: msgs.reverse().map((m) => ({
+          id: m.id, senderId: m.senderId, senderName: m.senderName,
+          senderAvatar: normalizeAvatar(m.senderAvatarConfig), content: m.content,
+          createdAt: new Date(m.createdAt).toISOString(),
+        })),
+      });
+    }
+
+    if (action === "clan_create") {
+      if (player.clubId) return NextResponse.json({ error: "Leave your current clan first." }, { status: 400 });
+      const name = sanitizeText(body.name, 24);
+      const tag = String(body.tag || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+      if (!name || name.length < 3) return NextResponse.json({ error: "Clan name must be 3+ characters." }, { status: 400 });
+      if (tag.length < 2) return NextResponse.json({ error: "Clan tag must be 2-4 letters/numbers." }, { status: 400 });
+      const [existing] = await db.select().from(clubs).where(eq(clubs.tag, tag)).limit(1);
+      if (existing) return NextResponse.json({ error: "That tag is taken — pick another." }, { status: 400 });
+      const [club] = await db
+        .insert(clubs)
+        .values({
+          name, tag,
+          badgeEmoji: ["🛡️", "⚔️", "🦉", "🔥", "💎", "🐍", "⭐", "👑"].includes(String(body.badgeEmoji)) ? String(body.badgeEmoji) : "🛡️",
+          description: sanitizeText(body.description, 120) || "No description yet.",
+          memberCount: 1,
+        })
+        .returning();
+      const [updated] = await db
+        .update(players)
+        .set({ clubId: club.id, clubJoinedAt: new Date() })
+        .where(eq(players.id, player.id))
+        .returning();
+      return NextResponse.json({ player: publicPlayer(updated), clubId: club.id });
+    }
+
+    if (action === "clan_join") {
+      if (player.clubId) return NextResponse.json({ error: "Leave your current clan first." }, { status: 400 });
+      const tag = String(body.tag || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+      const [club] = await db.select().from(clubs).where(eq(clubs.tag, tag)).limit(1);
+      if (!club) return NextResponse.json({ error: "No clan with that tag." }, { status: 404 });
+      if (club.memberCount >= 30) return NextResponse.json({ error: "That clan is full (30/30)." }, { status: 400 });
+      const [updatedClub] = await db
+        .update(clubs)
+        .set({ memberCount: club.memberCount + 1 })
+        .where(eq(clubs.id, club.id))
+        .returning();
+      const [updated] = await db
+        .update(players)
+        .set({ clubId: club.id, clubJoinedAt: new Date() })
+        .where(eq(players.id, player.id))
+        .returning();
+      return NextResponse.json({ player: publicPlayer(updated), clubId: updatedClub.id });
+    }
+
+    if (action === "clan_leave") {
+      if (!player.clubId) return NextResponse.json({ error: "You're not in a clan." }, { status: 400 });
+      const [club] = await db.select().from(clubs).where(eq(clubs.id, player.clubId)).limit(1);
+      const [updated] = await db.update(players).set({ clubId: null, clubJoinedAt: null }).where(eq(players.id, player.id)).returning();
+      if (club) {
+        const left = Math.max(0, club.memberCount - 1);
+        if (left === 0) await db.delete(clubs).where(eq(clubs.id, club.id));
+        else await db.update(clubs).set({ memberCount: left }).where(eq(clubs.id, club.id));
+      }
+      return NextResponse.json({ player: publicPlayer(updated) });
+    }
+
+    if (action === "buy_streak_shield") {
+      if ((player.streakShields || 0) >= STREAK_SHIELD.max) {
+        return NextResponse.json({ error: `You already hold ${STREAK_SHIELD.max} shields — the max!` }, { status: 400 });
+      }
+      if (player.coins < STREAK_SHIELD.priceCoins) {
+        return NextResponse.json({ error: `Need ${STREAK_SHIELD.priceCoins} coins (you have ${player.coins}).` }, { status: 400 });
+      }
+      const [updated] = await db
+        .update(players)
+        .set({ coins: player.coins - STREAK_SHIELD.priceCoins, streakShields: (player.streakShields || 0) + 1 })
+        .where(eq(players.id, player.id))
+        .returning();
+      return NextResponse.json({ player: publicPlayer(updated) });
+    }
+
+    if (action === "pin_achievements") {
+      const ids = Array.isArray(body.ids) ? body.ids.filter((i: unknown) => typeof i === "string").slice(0, 3) : [];
+      const done = Array.isArray(player.completedAchievements) ? player.completedAchievements : [];
+      const pinned = ids.filter((i: string) => done.includes(i));
+      const [updated] = await db.update(players).set({ pinnedAchievements: pinned }).where(eq(players.id, player.id)).returning();
+      return NextResponse.json({ player: publicPlayer(updated) });
+    }
+
+    if (action === "send_gift") {
+      const targetId = Number(body.targetId || 0);
+      if (!targetId || targetId === player.id) return NextResponse.json({ error: "Invalid target." }, { status: 400 });
+      if (player.coins < 10) return NextResponse.json({ error: "You need at least 10 coins to gift." }, { status: 400 });
+      const [target] = await db.select().from(players).where(eq(players.id, targetId)).limit(1);
+      if (!target) return NextResponse.json({ error: "Player not found." }, { status: 404 });
+      const day = localDateStr(0);
+      try {
+        await db.insert(giftLog).values({ senderId: player.id, targetId, kind: "coins", day });
+      } catch {
+        return NextResponse.json({ error: "You already gifted them today — come back tomorrow!" }, { status: 400 });
+      }
+      await db.update(players).set({ coins: player.coins - 10 }).where(eq(players.id, player.id));
+      await db.update(players).set({ coins: target.coins + 10 }).where(eq(players.id, target.id));
+      const [updated] = await db.select().from(players).where(eq(players.id, player.id)).limit(1);
+      return NextResponse.json({ player: publicPlayer(updated), sent: true });
+    }
+
+    if (action === "career_claim") {
+      const stageId = String(body.stageId || "").replace(/[^a-z0-9]/gi, "").slice(0, 8);
+      const stage = CAREER_STAGES.find((s) => s.id === stageId);
+      if (!stage) return NextResponse.json({ error: "Unknown stage." }, { status: 400 });
+      const claimed = Array.isArray(player.careerClaimed) ? [...player.careerClaimed] : [];
+      if (claimed.includes(stageId)) return NextResponse.json({ player: publicPlayer(player), already: true });
+      claimed.push(stageId);
+      const [updated] = await db
+        .update(players)
+        .set({ coins: player.coins + stage.coins, gems: player.gems + (stage.gems || 0), careerClaimed: claimed })
+        .where(eq(players.id, player.id))
+        .returning();
+      return NextResponse.json({ player: publicPlayer(updated), coins: stage.coins, gems: stage.gems || 0 });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

@@ -1,14 +1,14 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Coins, Copy, Dices, Gem, KeyRound, Loader2, Lock, Plus, Swords, Trophy, X } from "lucide-react";
+import { ArrowLeft, Coins, Copy, Dices, Gem, KeyRound, Loader2, Lock, Plus, Swords, Trophy, X, Network } from "lucide-react";
 import { CharacterAvatar } from "./Character";
 import { GuessRow, InputTiles, Keypad } from "./GameBoard";
 import { generateRandomCode, isValidSecretCode } from "@/lib/game-engine";
 import { fireWinEffect } from "@/lib/win-effects";
 import { makeId } from "@/lib/session";
 import { soundEngine } from "@/lib/sound-effects";
-import type { GuessEntry, Player, TournamentView } from "@/lib/types";
+import type { BracketMatchView, GuessEntry, Player, TournamentView } from "@/lib/types";
 import Credits from "@/components/Credits";
 
 function guestKey(): string {
@@ -57,6 +57,10 @@ export default function Tournament({
   const [huntSecret, setHuntSecret] = useState("");
   const [huntPrize, setHuntPrize] = useState(300);
   const [shakeTiles, setShakeTiles] = useState(false);
+  const [mode, setMode] = useState<"hunts" | "brackets">("hunts");
+  const [showBracketCreate, setShowBracketCreate] = useState(false);
+  const [cupName, setCupName] = useState("");
+  const [cupPot, setCupPot] = useState(1000);
   const aliveRef = useRef(true);
 
   const identityQs = useCallback(() => {
@@ -171,6 +175,58 @@ export default function Tournament({
     setBusy(false);
   };
 
+  const createBracket = async () => {
+    if (!token) { showToast("Create a free account to host a Bracket Cup!", "err"); return; }
+    setBusy(true);
+    try {
+      const { res, data } = await post({ action: "create_bracket", name: cupName.trim() || `${me.username}'s Bracket Cup`, prizeCoins: cupPot });
+      if (!res.ok) throw new Error(data.error || "Could not create bracket");
+      setShowBracketCreate(false);
+      setCupName("");
+      soundEngine.playReward();
+      showToast(`⚔️ Bracket Cup created! Share code ${data.tournament.inviteCode} — 8 players, winner takes the pot!`);
+      await load();
+      setSelectedId(data.tournament.id);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not create bracket", "err");
+    }
+    setBusy(false);
+  };
+
+  const joinBracket = async (t: TournamentView) => {
+    setBusy(true);
+    try {
+      const { res, data } = await post({ action: "join_bracket", id: t.id });
+      if (!res.ok) throw new Error(data.error || "Join failed");
+      setList((prev) => prev.map((x) => (x.id === data.tournament.id ? data.tournament : x)));
+      soundEngine.playJoin();
+      showToast("⚔️ You're in the bracket! Good luck!");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Join failed", "err");
+    }
+    setBusy(false);
+  };
+
+  const setWinner = async (round: number, match: number, winnerKey: string) => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const { res, data } = await post({ action: "bracket_set_winner", id: selected.id, round, match, winnerKey });
+      if (!res.ok) throw new Error(data.error || "Could not set result");
+      setList((prev) => prev.map((x) => (x.id === data.tournament.id ? data.tournament : x)));
+      soundEngine.playVictory();
+      if (data.isFinal) {
+        showToast(`🏆 ${data.championName} wins the cup — ${data.prizePaid > 0 ? `+${data.prizePaid} coins!` : "champion!"}`);
+        void fireWinEffect(me.effectId);
+      } else {
+        showToast("Result saved — bracket advanced!");
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not set result", "err");
+    }
+    setBusy(false);
+  };
+
   const findByCode = async () => {
     const code = joinCode.trim().toUpperCase();
     if (code.length < 4) return;
@@ -210,8 +266,8 @@ export default function Tournament({
       <button key={t.id} onClick={() => { setSelectedId(t.id); soundEngine.playTap(520); }}
         className="card-game p-3 text-left flex items-center gap-3 w-full active:scale-[0.98] transition-transform"
         style={selectedId === t.id ? { borderColor: "var(--gold)", boxShadow: "0 0 0 2px var(--gold), var(--shadow-card)" } : undefined}>
-        <span className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shrink-0" style={{ background: live ? "linear-gradient(135deg,#E0A800,#FF7A18)" : "var(--border-strong)" }}>
-          <Trophy size={21} strokeWidth={2.5} />
+        <span className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shrink-0" style={{ background: live ? (t.type === "bracket_8" ? "linear-gradient(135deg,#A560E8,#1CB0F6)" : "linear-gradient(135deg,#E0A800,#FF7A18)") : "var(--border-strong)" }}>
+          {t.type === "bracket_8" ? <Network size={21} strokeWidth={2.5} /> : <Trophy size={21} strokeWidth={2.5} />}
         </span>
         <span className="flex-1 min-w-0">
           <span className="font-display font-semibold block leading-tight truncate">{t.name}</span>
@@ -235,23 +291,44 @@ export default function Tournament({
           <ArrowLeft size={19} strokeWidth={2.8} />
         </button>
         <h2 className="font-display font-bold text-2xl flex-1">Tournaments 🏆</h2>
-        {token && (
-          <button onClick={() => setShowCreate((v) => !v)} className="btn-game btn-gold px-3 py-2 text-xs flex items-center gap-1">
+        {token && mode === "hunts" && (
+          <button onClick={() => { setShowBracketCreate(false); setShowCreate((v) => !v); }} className="btn-game btn-gold px-3 py-2 text-xs flex items-center gap-1">
             {showCreate ? <X size={14} strokeWidth={2.8} /> : <Plus size={14} strokeWidth={2.8} />} Host a hunt
+          </button>
+        )}
+        {token && mode === "brackets" && (
+          <button onClick={() => { setShowCreate(false); setShowBracketCreate((v) => !v); }} className="btn-game btn-purple px-3 py-2 text-xs flex items-center gap-1">
+            {showBracketCreate ? <X size={14} strokeWidth={2.8} /> : <Plus size={14} strokeWidth={2.8} />} Host bracket
           </button>
         )}
       </div>
 
-      <p className="text-sm font-bold mb-3" style={{ color: "var(--ink-soft)" }}>
-        🎯 <b>Mass Hunt:</b> one hidden code, EVERYONE races to crack it. First solver takes the prize pot!
-      </p>
+      {/* mode switch */}
+      <div className="grid grid-cols-2 gap-1.5 mb-3">
+        <button onClick={() => { setMode("hunts"); soundEngine.playTap(520); }} className={`btn-game py-2.5 flex items-center justify-center gap-1.5 ${mode === "hunts" ? "btn-gold" : "btn-ghost"}`}>
+          <Trophy size={15} strokeWidth={2.6} /> Code Hunts
+        </button>
+        <button onClick={() => { setMode("brackets"); soundEngine.playTap(520); }} className={`btn-game py-2.5 flex items-center justify-center gap-1.5 ${mode === "brackets" ? "btn-purple" : "btn-ghost"}`}>
+          <Network size={15} strokeWidth={2.6} /> Bracket Cups
+        </button>
+      </div>
+
+      {mode === "hunts" ? (
+        <p className="text-sm font-bold mb-3" style={{ color: "var(--ink-soft)" }}>
+          🎯 <b>Mass Hunt:</b> one hidden code, EVERYONE races to crack it. First solver takes the prize pot!
+        </p>
+      ) : (
+        <p className="text-sm font-bold mb-3" style={{ color: "var(--ink-soft)" }}>
+          ⚔️ <b>Bracket Cup:</b> 8 players, single elimination. Play each round however you like (online duel, bots don&rsquo;t count!) — the host taps the winner. Champion takes the pot. Anyone can watch!
+        </p>
+      )}
 
       {/* join by code */}
       <div className="flex gap-2 mb-3">
         <input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6))}
-          placeholder="HUNT CODE" className="input-game flex-1 px-3 py-2.5 font-display font-bold text-center tracking-[0.2em] uppercase" />
+          placeholder={mode === "brackets" ? "CUP CODE" : "HUNT CODE"} className="input-game flex-1 px-3 py-2.5 font-display font-bold text-center tracking-[0.2em] uppercase" />
         <button onClick={findByCode} disabled={busy || joinCode.length < 4} className="btn-game btn-purple px-4 flex items-center gap-1.5">
-          <KeyRound size={16} strokeWidth={2.6} /> Find hunt
+          <KeyRound size={16} strokeWidth={2.6} /> Find
         </button>
       </div>
 
@@ -289,16 +366,54 @@ export default function Tournament({
         </div>
       )}
 
+      {/* create bracket cup */}
+      {showBracketCreate && token && (
+        <div className="card-game p-4 mb-3 animate-pop">
+          <h3 className="font-display font-semibold text-lg">Host a Bracket Cup ⚔️</h3>
+          <p className="text-xs font-bold mt-0.5" style={{ color: "var(--ink-soft)" }}>
+            Up to 8 players join with your code. You are the host: after each duel, tap the winner to advance the bracket. Champion takes the pot (paid by the house)!
+          </p>
+          <input value={cupName} onChange={(e) => setCupName(e.target.value)} maxLength={30}
+            placeholder={`Cup name (e.g. ${me.username}'s Bracket Cup)`} className="input-game w-full px-3.5 py-2.5 font-black mt-3" />
+          <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+            <span className="text-[11px] font-black" style={{ color: "var(--ink-faint)" }}>PRIZE POT:</span>
+            {[500, 1000, 2000, 5000].map((amt) => (
+              <button key={amt} onClick={() => setCupPot(amt)} className={`btn-game px-3 py-1.5 text-xs flex items-center gap-1 ${cupPot === amt ? "btn-gold" : "btn-ghost"}`}>
+                <Coins size={12} /> {amt}
+              </button>
+            ))}
+          </div>
+          <button onClick={createBracket} disabled={busy} className="btn-game btn-green w-full py-3 mt-3 flex items-center justify-center gap-2">
+            {busy ? <Loader2 className="animate-spin" size={18} /> : <Network size={17} strokeWidth={2.7} />} Create cup!
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex flex-col items-center gap-3 py-14">
           <Loader2 className="animate-spin" size={28} />
-          <p className="font-black text-sm" style={{ color: "var(--ink-soft)" }}>Loading hunts...</p>
+          <p className="font-black text-sm" style={{ color: "var(--ink-soft)" }}>Loading tournaments...</p>
         </div>
       ) : (
         <>
-          <div className="space-y-1.5 mb-4">{list.map(huntCard)}</div>
+          <div className="space-y-1.5 mb-4">
+            {list
+              .filter((t) => (mode === "brackets" ? t.type === "bracket_8" : t.type !== "bracket_8"))
+              .map(huntCard)}
+          </div>
 
-          {selected && (
+          {selected && selected.type === "bracket_8" && (
+            <BracketPanel
+              t={selected}
+              me={me}
+              busy={busy}
+              onCopy={copyInvite}
+              onJoin={() => void joinBracket(selected)}
+              onSetWinner={(r, m, k) => void setWinner(r, m, k)}
+            />
+          )}
+
+          {selected && selected.type !== "bracket_8" && (
             <div className="board-theme rounded-3xl border-2 p-4 animate-pop" data-board={me.themeId} style={{ borderColor: "var(--board-border)", color: "var(--board-ink)" }}>
               <div className="flex items-start justify-between gap-2 flex-wrap">
                 <div>
@@ -381,6 +496,116 @@ export default function Tournament({
       )}
 
       <Credits />
+    </div>
+  );
+}
+
+/* ------------------------------ Bracket Cup panel ------------------------------ */
+
+function BracketPanel({ t, me, busy, onCopy, onJoin, onSetWinner }: {
+  t: TournamentView;
+  me: Player;
+  busy: boolean;
+  onCopy: (code: string) => void;
+  onJoin: () => void;
+  onSetWinner: (round: number, match: number, winnerKey: string) => void;
+}) {
+  const bracket = t.bracket;
+  return (
+    <div className="board-theme rounded-3xl border-2 p-4 animate-pop" data-board={me.themeId} style={{ borderColor: "var(--board-border)", color: "var(--board-ink)" }}>
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div>
+          <h3 className="font-display font-bold text-xl leading-tight">⚔️ {t.name}</h3>
+          <p className="text-[11px] font-black" style={{ color: "var(--board-soft)" }}>
+            {t.status === "live" ? `🟢 Live · ${t.participantCount || 0}/8 joined` : "Finished"}
+            {` · Pot ${t.prizeCoins} coins${t.prizeGems ? ` + ${t.prizeGems} gems` : ""}`}
+            {` · hosted by ${t.createdBy}`}
+          </p>
+        </div>
+        {t.inviteCode && (
+          <button onClick={() => onCopy(t.inviteCode as string)} className="chip px-2.5 py-1.5 font-black text-xs flex items-center gap-1.5">
+            <Copy size={13} /> {t.inviteCode}
+          </button>
+        )}
+      </div>
+
+      {t.status === "finished" && (
+        <div className="rounded-2xl px-3.5 py-2.5 mt-3 text-center font-black" style={{ background: "rgba(255,200,0,0.18)", border: "2px solid #FFC800" }}>
+          🏆 {bracket?.champion || t.winnerName || "—"} wins the cup!
+        </div>
+      )}
+
+      {t.status === "live" && !t.joined && (t.participantCount || 0) < 8 && (
+        <button onClick={onJoin} disabled={busy} className="btn-game btn-green w-full py-3 mt-3 flex items-center justify-center gap-2">
+          <Swords size={17} strokeWidth={2.7} /> Join this cup ({t.participantCount || 0}/8)
+        </button>
+      )}
+      {t.joined && t.status === "live" && (
+        <p className="text-center text-xs font-black mt-3" style={{ color: "var(--board-soft)" }}>
+          You&rsquo;re in! Play your duel when your pairing is set, then the host taps the winner. Watch live duels from the roster with the Watch button 👀
+        </p>
+      )}
+
+      {bracket ? (
+        <div className="mt-4 space-y-3">
+          {bracket.rounds.map((round, ri) => (
+            <div key={ri}>
+              <p className="text-[10px] font-black uppercase tracking-widest mb-1.5" style={{ color: "var(--board-soft)" }}>
+                {ri === bracket.rounds.length - 1 ? "FINAL" : ri === bracket.rounds.length - 2 ? "SEMI-FINALS" : `ROUND ${ri + 1}`}
+              </p>
+              <div className="space-y-1.5">
+                {round.map((m, mi) => (
+                  <BracketMatchRow
+                    key={`${ri}-${mi}`}
+                    m={m}
+                    round={ri}
+                    idx={mi}
+                    isHost={!!t.isHost && t.status === "live"}
+                    busy={busy}
+                    onSetWinner={onSetWinner}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm font-bold mt-3" style={{ color: "var(--board-soft)" }}>
+          The bracket is seeded once players join. Share the code to fill it up!
+        </p>
+      )}
+    </div>
+  );
+}
+
+function BracketMatchRow({ m, round, idx, isHost, busy, onSetWinner }: {
+  m: BracketMatchView;
+  round: number;
+  idx: number;
+  isHost: boolean;
+  busy: boolean;
+  onSetWinner: (round: number, match: number, winnerKey: string) => void;
+}) {
+  const ready = Boolean(m.aKey && m.bKey);
+  return (
+    <div className="rounded-2xl px-3 py-2 flex items-center gap-2" style={{ background: "var(--board-panel)", border: "2px solid var(--board-border)" }}>
+      <div className="flex-1 min-w-0 text-sm font-black truncate">
+        <span className={m.winnerKey && m.winnerKey === m.aKey ? "" : m.decided ? "opacity-50" : ""}>{m.a}</span>
+        <span className="mx-1.5 font-display" style={{ color: "var(--board-soft)" }}>vs</span>
+        <span className={m.winnerKey && m.winnerKey === m.bKey ? "" : m.decided ? "opacity-50" : ""}>{m.b}</span>
+      </div>
+      {m.decided ? (
+        <span className="text-[10px] font-black px-2 py-1 rounded-lg text-white shrink-0" style={{ background: "#58CC02" }}>✔ {m.winner}</span>
+      ) : ready && isHost ? (
+        <div className="flex gap-1 shrink-0">
+          <button onClick={() => onSetWinner(round, idx, m.aKey as string)} disabled={busy}
+            className="btn-game btn-ghost px-2 py-1 text-[10px]">{m.a} wins</button>
+          <button onClick={() => onSetWinner(round, idx, m.bKey as string)} disabled={busy}
+            className="btn-game btn-ghost px-2 py-1 text-[10px]">{m.b} wins</button>
+        </div>
+      ) : (
+        <span className="text-[10px] font-black shrink-0" style={{ color: "var(--board-soft)" }}>{ready ? "awaiting result" : "pairing..."}</span>
+      )}
     </div>
   );
 }

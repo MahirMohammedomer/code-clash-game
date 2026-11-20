@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ArrowLeft, Loader2, Play } from "lucide-react";
+import { ArrowLeft, Loader2, Play, Share2 } from "lucide-react";
+import { shareResult } from "@/lib/share-card";
 import { CharacterAvatar } from "./Character";
 import Replay from "./Replay";
 import { loadLocalHistory } from "@/lib/history";
@@ -90,6 +91,18 @@ export default function MatchHistory({
                   {MODE_LABELS[e.mode] || e.mode} · {e.turnsTaken} turns · {new Date(e.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}, {new Date(e.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>
+              <button
+                onClick={() => {
+                  void shareResult({
+                    title: e.result === "win" ? "I WON A DUEL!" : e.result === "draw" ? "DEAD HEAT!" : "EPIC REMATCH NEEDED",
+                    subtitle: `vs ${e.oppName} — ${e.turnsTaken} turns`,
+                    mode: MODE_LABELS[e.mode] || e.mode,
+                    stats: [{ label: "Result", value: e.result.toUpperCase() }],
+                  });
+                }}
+                className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center shrink-0" title="Share this result">
+                <Share2 size={15} strokeWidth={2.6} />
+              </button>
               <button onClick={() => setSelected(e)} className="btn-game btn-blue px-3 py-2 text-xs flex items-center gap-1 shrink-0">
                 <Play size={14} strokeWidth={2.8} /> Watch
               </button>
