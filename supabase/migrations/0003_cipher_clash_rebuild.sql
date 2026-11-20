@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS public.match_chat_messages (
 );
 
 -- ---------- reviews (public only after admin approval) ----------
-CREATE TABLE IF NOT EXISTS public.reviews (
+CREATE TABLE IF NOT EXISTS public.game_reviews (
   id SERIAL PRIMARY KEY,
   player_id INTEGER,
   username TEXT NOT NULL,
@@ -91,7 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_matches_room_code     ON public.matches (room_cod
 CREATE INDEX IF NOT EXISTS idx_matches_waiting       ON public.matches (status, is_private, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_match_chat_room       ON public.match_chat_messages (room_code, id);
 CREATE INDEX IF NOT EXISTS idx_match_reactions_room  ON public.match_reactions (room_code, id);
-CREATE INDEX IF NOT EXISTS idx_reviews_status        ON public.reviews (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_game_reviews_status   ON public.game_reviews (status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_feedback_created      ON public.feedback (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_follows_follower      ON public.follows (follower_id);
 

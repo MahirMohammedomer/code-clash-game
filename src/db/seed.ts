@@ -204,7 +204,7 @@ export async function ensureDatabaseReady() {
 
       CREATE INDEX IF NOT EXISTS idx_matches_waiting ON public.matches(status, is_private, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_match_chat_room ON public.match_chat_messages(room_code, id);
-      CREATE INDEX IF NOT EXISTS idx_reviews_status ON public.reviews(status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_game_reviews_status ON public.game_reviews(status, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_feedback_created ON public.feedback(created_at DESC);
 
       -- ===== v4 social update =====

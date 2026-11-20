@@ -208,7 +208,7 @@ export const matchReactions = pgTable("match_reactions", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const reviews = pgTable("reviews", {
+export const reviews = pgTable("game_reviews", {
   id: serial("id").primaryKey(),
   playerId: integer("player_id"),
   username: text("username").notNull(),
