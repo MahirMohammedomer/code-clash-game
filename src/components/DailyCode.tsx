@@ -212,7 +212,7 @@ export default function DailyCode({
 
   return (
     <div className="board-theme min-h-[100dvh] flex flex-col" data-board={me.themeId}>
-      <div className="sticky top-0 z-30 px-3 sm:px-5 pt-3 pb-2" style={{ background: "color-mix(in srgb, var(--board-panel) 88%, transparent)", backdropFilter: "blur(10px)", borderBottom: "2px solid var(--board-border)" }}>
+      <div className="sticky safe-top z-30 px-3 sm:px-5 pt-3 pb-2" style={{ background: "color-mix(in srgb, var(--board-panel) 88%, transparent)", backdropFilter: "blur(10px)", borderBottom: "2px solid var(--board-border)" }}>
         <div className="max-w-3xl mx-auto flex items-center gap-2">
           <button onClick={onBack} className="btn-game w-10 h-10 !rounded-xl flex items-center justify-center shrink-0"
             style={{ background: "var(--board-key)", color: "var(--board-ink)", border: "2px solid var(--board-border)", boxShadow: "0 3px 0 var(--board-border)" }} aria-label="Back">

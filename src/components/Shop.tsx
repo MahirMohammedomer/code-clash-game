@@ -168,9 +168,9 @@ export default function Shop({
   );
 
   return (
-    <div className="max-w-6xl mx-auto px-3 sm:px-5 pb-40 animate-fade">
+    <div className="max-w-6xl mx-auto px-3 sm:px-5 pb-48 animate-fade">
       {/* header */}
-      <div className="flex items-center gap-2 py-3 sticky top-0 z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
+      <div className="flex items-center gap-2 py-3 sticky safe-top z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
         <button onClick={onBack} className="btn-game btn-ghost w-10 h-10 !rounded-xl flex items-center justify-center" aria-label="Back">
           <ArrowLeft size={19} strokeWidth={2.8} />
         </button>
@@ -239,9 +239,10 @@ export default function Shop({
         Earn coins by winning matches · Gems come from quests, streaks &amp; achievements
       </p>
 
-      {/* sticky detail / buy bar */}
+      {/* sticky detail / buy bar — lifted above the fixed bottom TabBar */}
       {sel && (
-        <div className="fixed bottom-0 inset-x-0 z-30 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="fixed inset-x-0 z-30 px-3"
+          style={{ bottom: "calc(64px + max(6px, env(safe-area-inset-bottom)))" }}>
           <div className="max-w-2xl mx-auto card-game p-3 flex items-center gap-3 animate-slide-up">
             <div className="flex-1 min-w-0">
               <p className="font-display font-semibold leading-tight truncate">

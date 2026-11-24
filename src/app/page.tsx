@@ -1222,7 +1222,7 @@ export default function Page() {
         {showIosInstall && (
           <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
             <div className="absolute inset-0 bg-black/45 animate-fade" onClick={() => setShowIosInstall(false)} />
-            <div className="relative card-game w-full sm:max-w-sm p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center">
+            <div className="relative card-game w-full sm:max-w-sm p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center" style={{ paddingBottom: "calc(20px + env(safe-area-inset-bottom))" }}>
               <Character config={{ base: "owl", color: "classic", accessory: "crown" }} mood="happy" size={90} />
               <h3 className="font-display font-bold text-xl mt-1">Install on iPhone/iPad</h3>
               <p className="text-sm font-bold mt-1" style={{ color: "var(--ink-soft)" }}>
@@ -1306,9 +1306,9 @@ export default function Page() {
 
 
   return (
-    <div className="min-h-[100dvh]">
+    <div className="min-h-[100dvh]" style={{ paddingTop: "env(safe-area-inset-top)" }}>
       {/* ---- HUD ---- */}
-      <header className="sticky top-0 z-40" style={{ background: "var(--hud-bg)", backdropFilter: "blur(12px)", borderBottom: "2px solid var(--border)" }}>
+      <header className="sticky safe-top z-40" style={{ background: "var(--hud-bg)", backdropFilter: "blur(12px)", borderBottom: "2px solid var(--border)" }}>
         <div className="max-w-6xl mx-auto px-3 sm:px-5 py-2 flex items-center gap-2">
           <button onClick={() => { setShowProfile(true); soundEngine.playTap(520); }} className="flex items-center gap-2 min-w-0 active:scale-95 transition-transform">
             <CharacterAvatar config={me.avatarConfig} frameId={me.frameId} size={44} ringWidth={3} />
@@ -1354,7 +1354,7 @@ export default function Page() {
 
       {/* offline banner — bot games, arcade, daily code & local WiFi all still work */}
       {offline && (
-        <div className="sticky top-[52px] z-30 px-3 sm:px-5 pt-2" style={{ zIndex: 30 }}>
+        <div className="sticky safe-top-52 z-30 px-3 sm:px-5 pt-2" style={{ zIndex: 30 }}>
           <div className="max-w-6xl mx-auto rounded-2xl px-3 py-2 flex items-center gap-2 font-bold text-xs"
             style={{ background: "linear-gradient(120deg,#FF7A18,#FF4B4B)", color: "#fff", border: "2px solid rgba(255,255,255,0.35)", boxShadow: "var(--shadow-card)" }}>
             <WifiOff size={16} strokeWidth={2.6} className="shrink-0" />
@@ -1692,7 +1692,7 @@ export default function Page() {
       {showSettings && (
         <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="absolute inset-0 bg-black/45 animate-fade" onClick={() => setShowSettings(false)} />
-          <div className="relative card-game w-full sm:max-w-sm p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up">
+          <div className="relative card-game w-full sm:max-w-sm p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up" style={{ paddingBottom: "calc(20px + env(safe-area-inset-bottom))" }}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-display font-bold text-xl flex items-center gap-2"><Settings size={20} /> Settings</h3>
               <button onClick={() => setShowSettings(false)} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center"><X size={17} strokeWidth={2.8} /></button>
@@ -1735,7 +1735,7 @@ export default function Page() {
       {showIosInstall && (
         <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="absolute inset-0 bg-black/45 animate-fade" onClick={() => setShowIosInstall(false)} />
-          <div className="relative card-game w-full sm:max-w-sm p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center">
+          <div className="relative card-game w-full sm:max-w-sm p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center" style={{ paddingBottom: "calc(20px + env(safe-area-inset-bottom))" }}>
             <Character config={{ base: "owl", color: "classic", accessory: "crown" }} mood="happy" size={90} />
             <h3 className="font-display font-bold text-xl mt-1">Install on iPhone/iPad</h3>
             <p className="text-sm font-bold mt-1" style={{ color: "var(--ink-soft)" }}>
@@ -1764,7 +1764,7 @@ export default function Page() {
       )}
 
       {incomingInvites.length > 0 && (
-        <InvitePopup invite={incomingInvites[0]} onAnswer={answerInvite} />
+        <InvitePopup invite={incomingInvites[0]} onAnswer={answerInvite} aboveTabs={showTabs} />
       )}
 
       {showTabs && <TabBar active={activeTab} onGo={goTab} socialBadge={socialBadge} />}
@@ -1784,14 +1784,14 @@ export default function Page() {
         />
       )}
 
-      <Toasts toasts={toasts} />
+      <Toasts toasts={toasts} aboveTabs={showTabs} />
     </div>
   );
 }
 
 /* ------------------------------- Invite popup ------------------------------- */
 
-function InvitePopup({ invite, onAnswer }: { invite: InviteView; onAnswer: (inv: InviteView, acceptIt: boolean) => void }) {
+function InvitePopup({ invite, onAnswer, aboveTabs }: { invite: InviteView; onAnswer: (inv: InviteView, acceptIt: boolean) => void; aboveTabs?: boolean }) {
   const [leftSec, setLeftSec] = useState(75);
   useEffect(() => {
     const calc = () => Math.max(0, Math.round((new Date(invite.expiresAt).getTime() - Date.now()) / 1000));
@@ -1802,7 +1802,8 @@ function InvitePopup({ invite, onAnswer }: { invite: InviteView; onAnswer: (inv:
   }, [invite.id, invite.expiresAt]);
   if (leftSec <= 0) return null;
   return (
-    <div className="fixed inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[85] px-3 flex justify-center pointer-events-none">
+    <div className="fixed inset-x-0 z-[85] px-3 flex justify-center pointer-events-none"
+      style={{ bottom: aboveTabs ? "calc(64px + max(6px, env(safe-area-inset-bottom)))" : "max(1rem, env(safe-area-inset-bottom))" }}>
       <div className="card-game w-full max-w-md p-3.5 pointer-events-auto animate-pop" style={{ borderColor: "#A560E8", boxShadow: "0 12px 40px rgba(165,96,232,.4)" }}>
         <div className="flex items-center gap-3">
           <CharacterAvatar config={invite.fromAvatar} frameId={invite.fromFrame} size={52} ringWidth={3} mood="happy" />
@@ -1827,9 +1828,10 @@ function InvitePopup({ invite, onAnswer }: { invite: InviteView; onAnswer: (inv:
 
 /* ------------------------------- Toasts ------------------------------- */
 
-function Toasts({ toasts }: { toasts: Toast[] }) {
+function Toasts({ toasts, aboveTabs }: { toasts: Toast[]; aboveTabs?: boolean }) {
   return (
-    <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] inset-x-0 z-[90] flex flex-col items-center gap-2 px-4 pointer-events-none">
+    <div className="fixed inset-x-0 z-[90] flex flex-col items-center gap-2 px-4 pointer-events-none"
+      style={{ bottom: aboveTabs ? "calc(64px + max(6px, env(safe-area-inset-bottom)))" : "max(1rem, env(safe-area-inset-bottom))" }}>
       {toasts.map((t) => (
         <div key={t.id} className="animate-pop pointer-events-auto max-w-md text-center font-black text-sm px-4 py-2.5 rounded-2xl shadow-xl border-2"
           style={{
@@ -1969,7 +1971,7 @@ function PlaySheet({ me, onClose, onStartAI, onStartHotseat, onStartOnline, onSt
   return (
     <div className="fixed inset-0 z-[65] flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-black/45 backdrop-blur-[2px] animate-fade" onClick={onClose} />
-      <div className="relative card-game w-full sm:max-w-lg max-h-[92dvh] overflow-y-auto pretty-scroll rounded-b-none sm:rounded-b-[1.4rem] p-4 sm:p-5 animate-slide-up">
+      <div className="relative card-game w-full sm:max-w-lg max-h-[92dvh] overflow-y-auto pretty-scroll rounded-b-none sm:rounded-b-[1.4rem] p-4 sm:p-5 animate-slide-up" style={{ paddingBottom: "calc(16px + env(safe-area-inset-bottom))" }}>
         <div className="flex items-center gap-2 mb-3">
           {step !== "modes" && (
             <button onClick={() => setStep("modes")} className="btn-game btn-ghost w-9 h-9 !rounded-xl flex items-center justify-center"><ArrowLeft size={17} strokeWidth={2.8} /></button>
@@ -2171,8 +2173,8 @@ function RankScreen({ leaderboard, me, onBack, onRefresh, onOpenPlayer }: {
   const myIdx = leaderboard.findIndex((r) => r.id === me.id);
   const league = useMemo(() => computeWeeklyLeague(leaderboard, me.id), [leaderboard, me.id]);
   return (
-    <div className="max-w-3xl mx-auto px-3 sm:px-5 pb-16 animate-fade">
-      <div className="flex items-center gap-2 py-3 sticky top-0 z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
+    <div className="max-w-3xl mx-auto px-3 sm:px-5 pb-tabbar animate-fade">
+      <div className="flex items-center gap-2 py-3 sticky safe-top z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
         <button onClick={onBack} className="btn-game btn-ghost w-10 h-10 !rounded-xl flex items-center justify-center"><ArrowLeft size={19} strokeWidth={2.8} /></button>
         <h2 className="font-display font-bold text-2xl flex-1">Leaderboard</h2>
         <button onClick={onRefresh} className="btn-game btn-ghost px-3 py-2 text-xs">Refresh</button>
@@ -2271,7 +2273,7 @@ function ProfileModal({ me, rank, onClose, onCustomize, onLogout, isGuest }: {
   return (
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-black/45 backdrop-blur-[2px] animate-fade" onClick={onClose} />
-      <div className="relative card-game w-full sm:max-w-lg max-h-[92dvh] overflow-y-auto pretty-scroll rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up">
+      <div className="relative card-game w-full sm:max-w-lg max-h-[92dvh] overflow-y-auto pretty-scroll rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up" style={{ paddingBottom: "calc(16px + env(safe-area-inset-bottom))" }}>
         <div className="board-theme p-5 pb-4 rounded-t-[1.4rem]" data-board={me.themeId}>
           <button onClick={onClose} className="btn-game w-9 h-9 !rounded-xl flex items-center justify-center float-right"
             style={{ background: "var(--board-key)", color: "var(--board-ink)", border: "2px solid var(--board-border)", boxShadow: "0 3px 0 var(--board-border)" }}>
@@ -2400,7 +2402,7 @@ function InstallAskModal({ onInstall, onDismiss, onIos }: {
   return (
     <div className="fixed inset-0 z-[88] flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="absolute inset-0 bg-black/55 animate-fade" onClick={onDismiss} />
-      <div className="relative card-game w-full sm:max-w-md p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center overflow-hidden">
+      <div className="relative card-game w-full sm:max-w-md p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center overflow-hidden" style={{ paddingBottom: "calc(20px + env(safe-area-inset-bottom))" }}>
         <div className="absolute -top-12 -right-12 w-40 h-40 rounded-full opacity-20" style={{ background: "#14D4C5" }} />
         <div className="relative flex justify-center">
           <Character config={{ base: "owl", color: "classic", accessory: "crown" }} mood="happy" size={110} />
@@ -2439,7 +2441,7 @@ function NotifAskModal({ onEnable, onDismiss }: { onEnable: () => void; onDismis
   return (
     <div className="fixed inset-0 z-[88] flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="absolute inset-0 bg-black/55 animate-fade" onClick={onDismiss} />
-      <div className="relative card-game w-full sm:max-w-md p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center overflow-hidden">
+      <div className="relative card-game w-full sm:max-w-md p-5 rounded-b-none sm:rounded-b-[1.4rem] animate-slide-up text-center overflow-hidden" style={{ paddingBottom: "calc(20px + env(safe-area-inset-bottom))" }}>
         <div className="absolute -top-12 -left-12 w-40 h-40 rounded-full opacity-20" style={{ background: "#FFC800" }} />
         <div className="relative flex justify-center">
           <span className="w-24 h-24 rounded-full flex items-center justify-center text-white animate-flame" style={{ background: "linear-gradient(135deg,#FFC800,#FF7A18)" }}>

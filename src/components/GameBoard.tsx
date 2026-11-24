@@ -262,7 +262,7 @@ export function ResultOverlay({
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-[3px] animate-fade" />
-      <div className="relative card-game w-full max-w-md p-6 text-center animate-pop overflow-hidden">
+      <div className="relative card-game w-full max-w-md max-h-[92dvh] overflow-y-auto pretty-scroll p-6 text-center animate-pop">
         <div className="absolute -top-10 -right-10 w-36 h-36 rounded-full opacity-20" style={{ background: "var(--gold)" }} />
         <div className="absolute -bottom-12 -left-12 w-36 h-36 rounded-full opacity-15" style={{ background: "var(--brand)" }} />
         <div className="relative flex items-end justify-center gap-2 mb-1">
@@ -335,7 +335,7 @@ export function HeaderBar({
   onBack: () => void; backTitle: string;
 }) {
   return (
-    <div className="sticky top-0 z-30 px-3 sm:px-5 pt-3 pb-2" style={{ background: "color-mix(in srgb, var(--board-panel) 88%, transparent)", backdropFilter: "blur(10px)", borderBottom: "2px solid var(--board-border)" }}>
+    <div className="sticky safe-top z-30 px-3 sm:px-5 pt-3 pb-2" style={{ background: "color-mix(in srgb, var(--board-panel) 88%, transparent)", backdropFilter: "blur(10px)", borderBottom: "2px solid var(--board-border)" }}>
       <div className="max-w-5xl mx-auto flex items-start gap-2">
         <button onClick={onBack} title={backTitle} className="btn-game mt-8 w-10 h-10 !rounded-xl flex items-center justify-center shrink-0"
           style={{ background: "var(--board-key)", color: "var(--board-ink)", border: "2px solid var(--board-border)", boxShadow: "0 3px 0 var(--board-border)" }}>

@@ -351,3 +351,18 @@ body {
     animation: none !important;
   }
 }
+
+/* ===================== mobile overlap & safe-area fixes (v4.3) ===================== */
+
+/* Keep page content clear of the fixed bottom TabBar (~56px tall + home-indicator inset). */
+.pb-tabbar { padding-bottom: 76px; padding-bottom: calc(76px + max(6px, env(safe-area-inset-bottom))); }
+
+/* Sticky headers stop below the iPhone notch / status bar (viewport-fit=cover). */
+.safe-top { top: 0; top: max(0px, env(safe-area-inset-top)); }
+.safe-top-52 { top: 52px; top: calc(52px + env(safe-area-inset-top)); }
+
+/* iOS Safari auto-zooms the whole page when an input's font-size is under 16px —
+   force 16px on touch devices so focusing chat/search never zooms. */
+@media (pointer: coarse) {
+  .input-game { font-size: 16px !important; }
+}

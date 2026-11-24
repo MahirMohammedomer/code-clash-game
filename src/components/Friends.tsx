@@ -167,7 +167,7 @@ export default function Friends({
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-5 pb-16 animate-fade">
       {showHeader && (
-        <div className="flex items-center gap-2 py-3 sticky top-0 z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
+        <div className="flex items-center gap-2 py-3 sticky safe-top z-20" style={{ background: "color-mix(in srgb, var(--bg) 82%, transparent)", backdropFilter: "blur(10px)" }}>
           <button onClick={onBack} className="btn-game btn-ghost w-10 h-10 !rounded-xl flex items-center justify-center" aria-label="Back">
             <ArrowLeft size={19} strokeWidth={2.8} />
           </button>
